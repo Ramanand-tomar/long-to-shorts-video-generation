@@ -145,7 +145,12 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
             flexDirection: "column",
             alignItems: "center",
             justifyContent: flexPosition,
-            padding: flexPosition === "center" ? "20px" : "60px 20px",
+            padding:
+              flexPosition === "center"
+                ? "20px"
+                : flexPosition === "flex-start"
+                ? "240px 20px 120px 20px" // Top Overlay pushed down
+                : "120px 20px 380px 20px", // Bottom Overlay pushed up (Shorts safe-zone)
             pointerEvents: "none",
           }}
         >

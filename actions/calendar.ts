@@ -305,3 +305,102 @@ export async function getScheduledPosts() {
   }
 }
 
+interface PublishPostNowPayload {
+  clipId: string;
+  connectionIds: string[];
+  caption: string;
+}
+
+/**
+ * Publishes a post immediately to selected connected channels.
+ */
+export async function publishPostNow(payload: PublishPostNowPayload) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return { error: "unauthorized" };
+    }
+
+    const { clipId, connectionIds, caption } = payload;
+
+    if (!clipId || !connectionIds || connectionIds.length === 0) {
+      return { error: "missing_required_fields" };
+    }
+
+    // 1. Fetch the clip and confirm ownership
+    const [clip] = await db
+      .select({
+        id: clips.id,
+        renderStatus: clips.renderStatus,
+        videoId: clips.videoId,
+        userId: videos.userId,
+      })
+      .from(clips)
+      .innerJoin(videos, eq(clips.videoId, videos.id))
+      .where(and(eq(clips.id, clipId), eq(videos.userId, user.id)))
+      .limit(1);
+
+    if (!clip) {
+      return { error: "clip_not_found" };
+    }
+
+    // 2. Confirm clip is rendered (completed)
+    if (clip.renderStatus !== "completed") {
+      return { error: "clip_not_rendered" };
+    }
+
+    // 3. Validate connections exist and belong to the user
+    for (const connectionId of connectionIds) {
+      const [connection] = await db
+        .select()
+        .from(socialConnections)
+        .where(
+          and(
+            eq(socialConnections.id, connectionId),
+            eq(socialConnections.userId, user.id)
+          )
+        )
+        .limit(1);
+
+      if (!connection) {
+        return { error: `invalid_connection_${connectionId}` };
+      }
+    }
+
+    // 4. Create post records with status 'scheduled' and scheduledFor = now
+    const scheduledRecords = [];
+    const now = new Date();
+    for (const connectionId of connectionIds) {
+      const [scheduled] = await db
+        .insert(scheduledPosts)
+        .values({
+          userId: user.id,
+          clipId,
+          connectionId,
+          caption,
+          scheduledFor: now,
+          status: "scheduled",
+        })
+        .returning();
+
+      // Dispatch the Inngest event to trigger the publishing flow immediately (no sleep since it's already due/now)
+      await inngest.send({
+        name: "vidshort/post.publish",
+        data: {
+          scheduledPostId: scheduled.id,
+        },
+      });
+
+      scheduledRecords.push(scheduled);
+    }
+
+    revalidatePath("/dashboard/calendar");
+    revalidatePath("/dashboard");
+
+    return { success: true, publishedPosts: scheduledRecords };
+  } catch (error) {
+    console.error("Failed to publish post immediately:", error);
+    return { error: "internal_server_error" };
+  }
+}
+

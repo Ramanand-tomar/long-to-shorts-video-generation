@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Player } from "@remotion/player";
 import { ClipComposition, StyleConfig, WordSegment } from "@/components/remotion/ClipComposition";
 import { saveClipStyle, startRender, getRenderStatus } from "@/actions/render";
+import { getConnectedAccounts } from "@/actions/social";
+import { publishPostNow, generateAICaption } from "@/actions/calendar";
 import {
   ChevronLeft,
   Save,
@@ -14,6 +16,11 @@ import {
   AlertCircle,
   Sliders,
   CheckCircle,
+  Share2,
+  Sparkles,
+  Plus,
+  XCircle,
+  MessageSquare,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -51,7 +58,7 @@ interface ClipEditorClientProps {
 
 const DEFAULT_STYLE_CONFIG: StyleConfig = {
   fontFamily: "Inter",
-  fontSize: 24,
+  fontSize: 54,
   captionColor: "#ffffff",
   highlightColor: "#fbbf24",
   textPosition: "bottom",
@@ -87,6 +94,96 @@ export default function ClipEditorClient({
   // Polling states for rendering status
   const [renderStatus, setRenderStatus] = useState<string>(clip.renderStatus);
   const [clipUrl, setClipUrl] = useState<string | null>(clip.clipUrl);
+
+  // Publish / Direct Upload states
+  const [publishModalOpen, setPublishModalOpen] = useState(false);
+  const [connections, setConnections] = useState<any[]>([]);
+  const [selectedConnections, setSelectedConnections] = useState<string[]>([]);
+  const [publishCaption, setPublishCaption] = useState(clip.captionText || "");
+  const [publishing, setPublishing] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [generatingCaption, setGeneratingCaption] = useState(false);
+
+  // Fetch connections on mount
+  useEffect(() => {
+    async function loadConnections() {
+      try {
+        const data = await getConnectedAccounts();
+        if (Array.isArray(data)) {
+          setConnections(data);
+          // Pre-select any connected youtube channels
+          const youtubeIds = data
+            .filter((conn) => conn.platform.toLowerCase() === "youtube")
+            .map((conn) => conn.id);
+          setSelectedConnections(youtubeIds);
+        }
+      } catch (err) {
+        console.error("Failed to load connected accounts:", err);
+      }
+    }
+    loadConnections();
+  }, []);
+
+  const handlePublishSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedConnections.length === 0) {
+      setError("Please select at least one social media connection.");
+      return;
+    }
+    setPublishing(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const result = await publishPostNow({
+        clipId: clip.id,
+        connectionIds: selectedConnections,
+        caption: publishCaption,
+      });
+
+      if (result.error) {
+        setError(`Failed to publish clip: ${result.error}`);
+      } else {
+        setSuccess("Clip publication has been queued successfully!");
+        setPublishModalOpen(false);
+        router.refresh();
+      }
+    } catch (err) {
+      console.error(err);
+      setError("An unexpected error occurred while publishing.");
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const handleAIGenerate = async () => {
+    if (!aiPrompt.trim()) return;
+    setGeneratingCaption(true);
+    setError(null);
+
+    try {
+      const result = await generateAICaption(
+        aiPrompt,
+        clip.title,
+        clip.hookText || ""
+      );
+
+      if (result.error) {
+        setError(`Failed to generate AI caption: ${result.error}`);
+      } else if (result.caption) {
+        const hashtagsText = Array.isArray(result.hashtags) && result.hashtags.length > 0
+          ? "\n\n" + result.hashtags.map((h: string) => `#${h}`).join(" ")
+          : "";
+        setPublishCaption(`${result.caption}${hashtagsText}`);
+        setSuccess("AI Caption generated!");
+      }
+    } catch (err) {
+      console.error(err);
+      setError("An unexpected error occurred while generating AI caption.");
+    } finally {
+      setGeneratingCaption(false);
+    }
+  };
 
   const fps = 30;
   const startFrame = Math.round(clip.startTime * fps);
@@ -385,7 +482,7 @@ export default function ClipEditorClient({
               <input
                 type="range"
                 min="14"
-                max="40"
+                max="90"
                 value={styleConfig.fontSize}
                 onChange={(e) => setStyleConfig({ ...styleConfig, fontSize: parseInt(e.target.value) })}
                 className="w-full accent-violet-600 cursor-pointer"
@@ -519,16 +616,25 @@ export default function ClipEditorClient({
             </button>
 
             {renderStatus === "completed" && clipUrl ? (
-              <a
-                href={clipUrl}
-                download={`vidshort-clip-${clip.id}.mp4`}
-                target="_blank"
-                rel="noreferrer"
-                className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/10 transition-all text-center"
-              >
-                <Download className="w-4 h-4 fill-white/20" />
-                Download MP4
-              </a>
+              <div className="flex gap-3">
+                <a
+                  href={clipUrl}
+                  download={`vidshort-clip-${clip.id}.mp4`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex-1 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/10 transition-all text-center"
+                >
+                  <Download className="w-4 h-4 fill-white/20" />
+                  Download
+                </a>
+                <button
+                  onClick={() => setPublishModalOpen(true)}
+                  className="flex-1 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:opacity-90 text-white font-bold text-sm shadow-lg shadow-violet-500/15 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                >
+                  <Share2 className="w-4 h-4" />
+                  Publish Clip
+                </button>
+              </div>
             ) : (
               <button
                 onClick={handleStartRender}
@@ -553,6 +659,181 @@ export default function ClipEditorClient({
         </div>
 
       </div>
+
+      {/* Premium Publish Modal */}
+      {publishModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-6 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/50">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-violet-500/10 text-violet-400">
+                  <Share2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-white font-bold text-lg">Publish Clip</h3>
+                  <p className="text-zinc-500 text-xs mt-0.5">Post this vertical short to your connected social channels</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPublishModalOpen(false)}
+                className="text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <XCircle className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Modal Content - Scrollable */}
+            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+              {/* Select Connection */}
+              <div className="space-y-3">
+                <label className="text-[11px] font-bold text-zinc-400 tracking-wider uppercase block">
+                  Select Channel / Account
+                </label>
+                {connections.length === 0 ? (
+                  <div className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800 text-center">
+                    <p className="text-sm text-zinc-500">No social media accounts connected.</p>
+                    <Link
+                      href="/dashboard/connections"
+                      className="mt-3 inline-flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 font-semibold"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Connect an account
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {connections.map((conn) => {
+                      const isSelected = selectedConnections.includes(conn.id);
+                      return (
+                        <button
+                          key={conn.id}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) {
+                              setSelectedConnections(selectedConnections.filter((id) => id !== conn.id));
+                            } else {
+                              setSelectedConnections([...selectedConnections, conn.id]);
+                            }
+                          }}
+                          className={`flex items-center justify-between p-3.5 rounded-2xl border text-left transition-all ${
+                            isSelected
+                              ? "bg-violet-500/10 border-violet-500/50 text-white"
+                              : "bg-zinc-950 border-zinc-850 hover:bg-zinc-900 text-zinc-400"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            {conn.profilePicture ? (
+                              <img
+                                src={conn.profilePicture}
+                                alt={conn.profileName}
+                                className="w-8 h-8 rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-violet-600/20 flex items-center justify-center font-bold text-violet-400 text-sm">
+                                {conn.platform.charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <div>
+                              <p className="text-sm font-semibold text-white">
+                                {conn.profileName || "Connected Account"}
+                              </p>
+                              <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-500">
+                                {conn.platform}
+                              </span>
+                            </div>
+                          </div>
+                          <div
+                            className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${
+                              isSelected ? "border-violet-500 bg-violet-500 text-white" : "border-zinc-700"
+                            }`}
+                          >
+                            {isSelected && <span className="text-[10px] font-bold">✓</span>}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* AI Caption Assistance */}
+              <div className="p-4 rounded-2xl bg-zinc-950 border border-zinc-855 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-300">
+                    <Sparkles className="w-4 h-4 text-violet-400" />
+                    <span>AI Caption Generator</span>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    placeholder="e.g. write a funny, engaging hook for this..."
+                    className="flex-1 bg-zinc-900 border border-zinc-800 text-xs rounded-xl px-3 py-2 text-zinc-300 focus:outline-none focus:border-violet-500 placeholder-zinc-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAIGenerate}
+                    disabled={generatingCaption || !aiPrompt.trim()}
+                    className="px-4 py-2 bg-zinc-850 hover:bg-zinc-800 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1 cursor-pointer"
+                  >
+                    {generatingCaption ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      "Generate"
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Caption Content */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold text-zinc-400 tracking-wider uppercase block">
+                  Caption / Description
+                </label>
+                <textarea
+                  value={publishCaption}
+                  onChange={(e) => setPublishCaption(e.target.value)}
+                  placeholder="Describe your short video here..."
+                  rows={4}
+                  className="w-full bg-zinc-950 border border-zinc-850 text-zinc-300 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-6 border-t border-zinc-850 bg-zinc-900/50 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setPublishModalOpen(false)}
+                className="flex-1 py-3 bg-zinc-950 hover:bg-zinc-900 text-zinc-400 hover:text-white font-bold text-sm rounded-xl border border-zinc-850 transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handlePublishSubmit}
+                disabled={publishing || selectedConnections.length === 0}
+                className="flex-1 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:opacity-90 disabled:opacity-50 text-white font-bold text-sm shadow-lg shadow-violet-500/10 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {publishing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Publishing...
+                  </>
+                ) : (
+                  <>
+                    <Share2 className="w-4 h-4" />
+                    Publish Now
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
