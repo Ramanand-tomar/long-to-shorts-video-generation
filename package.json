@@ -4,24 +4,40 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "inngest:dev": "npx inngest-cli@latest dev -u http://localhost:3000/api/inngest",
+    "dev:all": "concurrently -k -n \"next,inngest\" -c \"blue,green\" \"npm run dev\" \"npm run inngest:dev\"",
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.5.7",
+    "@neondatabase/serverless": "^1.1.0",
+    "@remotion/lambda": "^4.0.482",
+    "@remotion/player": "^4.0.482",
+    "@zernio/node": "^0.2.285",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.2",
+    "inngest": "^4.10.0",
+    "lucide-react": "^1.21.0",
+    "next": "15.5.19",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "next": "15.5.19"
+    "remotion": "^4.0.482",
+    "svix": "^1.96.0",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "typescript": "^5",
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4",
+    "concurrently": "^8.2.2",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "15.5.19",
-    "@eslint/eslintrc": "^3"
+    "tailwindcss": "^4",
+    "typescript": "^5"
   }
 }
