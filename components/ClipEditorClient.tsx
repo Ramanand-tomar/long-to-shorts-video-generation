@@ -730,8 +730,8 @@ export default function ClipEditorClient({
                           }`}
                         >
                           <div className="flex items-center gap-3">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             {conn.profilePicture ? (
+                              // eslint-disable-next-line @next/next/no-img-element
                               <img
                                 src={conn.profilePicture}
                                 alt={conn.profileName || "profile"}
