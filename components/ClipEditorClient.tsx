@@ -20,7 +20,6 @@ import {
   Sparkles,
   Plus,
   XCircle,
-  MessageSquare,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -48,6 +47,14 @@ interface VideoDetail {
   id: string;
   title: string;
   videoUrl: string;
+}
+
+interface SocialConnection {
+  id: string;
+  platform: string;
+  profileName: string | null;
+  profilePicture: string | null;
+  createdAt: Date;
 }
 
 interface ClipEditorClientProps {
@@ -97,7 +104,7 @@ export default function ClipEditorClient({
 
   // Publish / Direct Upload states
   const [publishModalOpen, setPublishModalOpen] = useState(false);
-  const [connections, setConnections] = useState<any[]>([]);
+  const [connections, setConnections] = useState<SocialConnection[]>([]);
   const [selectedConnections, setSelectedConnections] = useState<string[]>([]);
   const [publishCaption, setPublishCaption] = useState(clip.captionText || "");
   const [publishing, setPublishing] = useState(false);
@@ -723,10 +730,11 @@ export default function ClipEditorClient({
                           }`}
                         >
                           <div className="flex items-center gap-3">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             {conn.profilePicture ? (
                               <img
                                 src={conn.profilePicture}
-                                alt={conn.profileName}
+                                alt={conn.profileName || "profile"}
                                 className="w-8 h-8 rounded-full object-cover"
                               />
                             ) : (

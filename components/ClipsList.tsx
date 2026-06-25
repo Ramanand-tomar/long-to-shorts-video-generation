@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { Scissors, Play, Clock, Calendar, Sparkles, Download, ExternalLink } from "lucide-react";
+import { Scissors, Play, Clock, Sparkles, Download, ExternalLink } from "lucide-react";
 
 interface Clip {
   id: string;
