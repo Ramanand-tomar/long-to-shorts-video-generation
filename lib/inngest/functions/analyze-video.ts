@@ -124,6 +124,7 @@ Guidelines:
 2. Each clip must range from 15 seconds to 90 seconds.
 3. The start and end times must align precisely with the word timestamps in the transcript.
 4. Keep the clips contextually complete (don't cut off mid-thought).
+5. Language optimization: Detect the primary language spoken in the transcript. If the transcript is in Hindi (whether written in Devanagari script or romanized Hinglish/Latin characters like "aaj hum baat karenge"), you MUST write the output fields 'title', 'description', 'reason', 'hookText', and 'captionText' in Hindi (using Devanagari script). If it is in another language, write those fields in that respective language. Otherwise, default to English.
 
 Transcript:
 ---

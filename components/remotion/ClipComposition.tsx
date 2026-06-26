@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Video, useCurrentFrame, useVideoConfig } from "remotion";
+import { OffthreadVideo, useCurrentFrame, useVideoConfig } from "remotion";
 
 export interface WordSegment {
   word: string;
@@ -133,7 +133,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
       return (
         <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
           {/* Blurred Background Video */}
-          <Video
+          <OffthreadVideo
             src={videoUrl}
             startFrom={startFrame}
             endAt={endFrame}
@@ -150,7 +150,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
             }}
           />
           {/* Sharp Centered Video in Foreground */}
-          <Video
+          <OffthreadVideo
             src={videoUrl}
             startFrom={startFrame}
             endAt={endFrame}
@@ -173,7 +173,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
       const isWhite = layout === "fit_white";
       return (
         <div style={{ position: "absolute", inset: 0, backgroundColor: isWhite ? "#ffffff" : "#000000" }}>
-          <Video
+          <OffthreadVideo
             src={videoUrl}
             startFrom={startFrame}
             endAt={endFrame}
@@ -192,7 +192,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
 
     // Default Full Crop (crop)
     return (
-      <Video
+      <OffthreadVideo
         src={videoUrl}
         startFrom={startFrame}
         endAt={endFrame}
