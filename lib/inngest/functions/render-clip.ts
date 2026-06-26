@@ -140,7 +140,7 @@ export const renderClip = inngest.createFunction(
 
       const durationInFrames = Math.max(30, Math.round((endFrame - startFrame) / speed));
 
-      // Concurrency settings to handle AWS account rate limits
+       // Concurrency settings to handle AWS account rate limits
       const concurrencyEnv = process.env.REMOTION_CONCURRENCY
         ? parseInt(process.env.REMOTION_CONCURRENCY, 10)
         : undefined;
@@ -148,7 +148,7 @@ export const renderClip = inngest.createFunction(
         ? parseInt(process.env.REMOTION_FRAMES_PER_LAMBDA, 10)
         : undefined;
 
-      // Determine concurrency config parameter to pass (default to safe framesPerLambda of 200 if none provided)
+      // Determine concurrency config parameter to pass
       let concurrencyOption: number | undefined = undefined;
       let framesPerLambdaOption: number | undefined = undefined;
 
@@ -157,11 +157,12 @@ export const renderClip = inngest.createFunction(
       } else if (concurrencyEnv !== undefined) {
         concurrencyOption = concurrencyEnv;
       } else {
-        // Default to a safe limit of 350 frames per Lambda chunk.
-        // This ensures chunks never time out under the 120s Lambda limit,
-        // while keeping total concurrency extremely low (e.g. 7 Lambdas for a 78s video)
-        // to avoid hitting AWS rate limits.
-        framesPerLambdaOption = 350;
+        // Use adaptive chunk size based on layout complexity.
+        // Blurry background layout uses 2 OffthreadVideo tags and heavy CSS blur,
+        // so it requires much smaller chunks (100 frames) to prevent timeouts.
+        // Other layouts can safely use 200 frames.
+        const isBlurLayout = styleConfig.layoutType === "blur_background";
+        framesPerLambdaOption = isBlurLayout ? 100 : 200;
       }
 
       // Trigger the Remotion Lambda rendering task
@@ -186,7 +187,7 @@ export const renderClip = inngest.createFunction(
       await step.run("poll-lambda-progress", async () => {
         let isDone = false;
         let attempts = 0;
-        const maxAttempts = 60; // 5 minutes max
+        const maxAttempts = 180; // 15 minutes max (180 attempts * 5s = 900s)
 
         while (!isDone && attempts < maxAttempts) {
           attempts++;
@@ -225,7 +226,7 @@ export const renderClip = inngest.createFunction(
         }
 
         if (!isDone) {
-          throw new Error("Rendering timed out on Remotion Lambda after 5 minutes.");
+          throw new Error("Rendering timed out on Remotion Lambda after 15 minutes.");
         }
       });
 

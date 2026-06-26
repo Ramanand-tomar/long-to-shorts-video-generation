@@ -143,7 +143,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
               width: "100%",
               height: "100%",
               objectFit: "cover",
-              filter: "blur(20px) brightness(0.6)",
+              filter: "blur(10px) brightness(0.6)",
               transform: isMirrored ? "scale(1.2) scaleX(-1)" : "scale(1.2)",
               position: "absolute",
               inset: 0,
