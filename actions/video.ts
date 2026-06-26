@@ -89,3 +89,44 @@ export async function createVideo(payload: CreateVideoPayload) {
     return { error: "internal_server_error" };
   }
 }
+
+/**
+ * Server action to delete an uploaded video.
+ * Cascading constraints in the database will automatically remove associated clips and jobs.
+ */
+export async function deleteVideo(videoId: string) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return { error: "unauthorized" };
+    }
+
+    // 1. Confirm video ownership
+    const [video] = await db
+      .select({
+        id: videos.id,
+        userId: videos.userId,
+      })
+      .from(videos)
+      .where(eq(videos.id, videoId))
+      .limit(1);
+
+    if (!video || video.userId !== user.id) {
+      return { error: "video_not_found" };
+    }
+
+    // 2. Delete video (cascade deletion is automatic)
+    await db
+      .delete(videos)
+      .where(eq(videos.id, videoId));
+
+    // 3. Revalidate dynamic routes
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/videos");
+
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to delete video:", error);
+    return { error: "internal_server_error" };
+  }
+}

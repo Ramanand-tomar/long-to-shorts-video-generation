@@ -193,3 +193,44 @@ export async function getRenderStatus(clipId: string) {
     return { error: "internal_server_error" };
   }
 }
+
+/**
+ * Server action to delete an individual AI generated clip.
+ */
+export async function deleteClip(clipId: string) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return { error: "unauthorized" };
+    }
+
+    // 1. Retrieve the clip and verify ownership via the associated video
+    const [clip] = await db
+      .select({
+        id: clips.id,
+        videoId: clips.videoId,
+        userId: videos.userId,
+      })
+      .from(clips)
+      .innerJoin(videos, eq(clips.videoId, videos.id))
+      .where(eq(clips.id, clipId))
+      .limit(1);
+
+    if (!clip || clip.userId !== user.id) {
+      return { error: "clip_not_found" };
+    }
+
+    // 2. Delete the clip row
+    await db
+      .delete(clips)
+      .where(eq(clips.id, clipId));
+
+    // 3. Revalidate paths to update the clip details page and video detail page
+    revalidatePath(`/dashboard/videos/${clip.videoId}`);
+
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to delete clip:", error);
+    return { error: "internal_server_error" };
+  }
+}

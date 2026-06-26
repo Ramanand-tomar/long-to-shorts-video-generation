@@ -19,9 +19,11 @@ import {
   RefreshCw,
   Sliders,
   Download,
-  Share2
+  Share2,
+  Trash2
 } from "lucide-react";
 import Link from "next/link";
+import { deleteClip } from "@/actions/render";
 
 interface Video {
   id: string;
@@ -109,6 +111,27 @@ export default function VideoDetail({ video, analysisJob, clips }: VideoDetailPr
   const [error, setError] = useState<string | null>(null);
   const [activeClipUrl, setActiveClipUrl] = useState<string | null>(null);
   const [activeClipTitle, setActiveClipTitle] = useState<string | null>(null);
+  const [deletingClipId, setDeletingClipId] = useState<string | null>(null);
+
+  const handleDeleteClip = async (clipId: string) => {
+    if (!confirm("Are you sure you want to delete this clip suggestion?")) {
+      return;
+    }
+    
+    setDeletingClipId(clipId);
+    try {
+      const result = await deleteClip(clipId);
+      if (result.error) {
+        setError(`Failed to delete clip: ${result.error}`);
+      } else {
+        router.refresh();
+      }
+    } catch {
+      setError("An unexpected error occurred while deleting the clip.");
+    } finally {
+      setDeletingClipId(null);
+    }
+  };
 
   // Polling states
   const [currentJobId, setCurrentJobId] = useState<string | null>(analysisJob?.id || null);
@@ -493,8 +516,21 @@ export default function VideoDetail({ video, analysisJob, clips }: VideoDetailPr
 
                       <div className="flex gap-2">
                         <button
+                          onClick={() => handleDeleteClip(clip.id)}
+                          disabled={deletingClipId !== null}
+                          className="px-3.5 py-2.5 rounded-xl bg-zinc-950/20 border border-zinc-900 hover:border-rose-500/30 text-zinc-500 hover:text-rose-400 hover:bg-rose-500/5 transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center"
+                          title="Delete Clip suggestion"
+                        >
+                          {deletingClipId === clip.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+
+                        <button
                           onClick={() => handlePreviewClip(clip)}
-                          className="flex-1 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-750 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1"
+                          className="flex-1 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-750 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
                         >
                           <Play className="w-3 h-3 fill-white" />
                           Preview
@@ -507,7 +543,7 @@ export default function VideoDetail({ video, analysisJob, clips }: VideoDetailPr
                               download
                               target="_blank"
                               rel="noreferrer"
-                              className="px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white transition-colors flex items-center justify-center"
+                              className="px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white transition-colors flex items-center justify-center text-center"
                               title="Download Clip"
                             >
                               <Download className="w-3.5 h-3.5" />

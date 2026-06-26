@@ -2,8 +2,9 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { Film, Play, Clock, Calendar, Plus, Sparkles } from "lucide-react";
+import { Film, Play, Clock, Calendar, Plus, Sparkles, Trash2, Loader2 } from "lucide-react";
 import UploadModal from "./UploadModal";
+import { deleteVideo } from "@/actions/video";
 
 interface Video {
   id: string;
@@ -27,6 +28,26 @@ interface VideosListProps {
 
 export default function VideosList({ videos, userPlan }: VideosListProps) {
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDeleteVideo = async (videoId: string) => {
+    if (!confirm("Are you sure you want to delete this video? This will also delete all associated clips and scheduled posts.")) {
+      return;
+    }
+    
+    setDeletingId(videoId);
+    try {
+      const result = await deleteVideo(videoId);
+      if (result.error) {
+        alert(`Failed to delete video: ${result.error}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("An unexpected error occurred while deleting the video.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   // Helper to format video duration into HH:MM:SS or MM:SS
   const formatDuration = (seconds: number | null) => {
@@ -165,14 +186,29 @@ export default function VideosList({ videos, userPlan }: VideosListProps) {
                       </span>
                     )}
 
-                    {/* Action link */}
-                    <Link
-                      href={`/dashboard/videos/${video.id}`}
-                      className="px-4 py-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white font-bold text-xs transition-colors flex items-center gap-1.5"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-violet-400" />
-                      Analyse
-                    </Link>
+                    {/* Action buttons */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleDeleteVideo(video.id)}
+                        disabled={deletingId !== null}
+                        className="p-2 rounded-xl bg-zinc-950/20 border border-zinc-900 hover:border-rose-500/30 text-zinc-500 hover:text-rose-400 hover:bg-rose-500/5 transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center"
+                        title="Delete Video"
+                      >
+                        {deletingId === video.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
+                      </button>
+
+                      <Link
+                        href={`/dashboard/videos/${video.id}`}
+                        className="px-4 py-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white font-bold text-xs transition-colors flex items-center gap-1.5"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                        Analyse
+                      </Link>
+                    </div>
                   </div>
                 </div>
 

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { videos, clips } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { renderMediaOnLambda, getRenderProgress, AwsRegion } from "@remotion/lambda";
+import { StyleConfig } from "@/components/remotion/ClipComposition";
 
 interface EventData {
   clipId: string;
@@ -113,15 +114,21 @@ export const renderClip = inngest.createFunction(
         (w) => w.start >= clip.startTime && w.start <= clip.endTime
       );
 
-      const styleConfig = clip.subtitleStyle || {
+      const styleConfig = (clip.subtitleStyle as StyleConfig) || {
         fontFamily: "Inter",
         fontSize: 20,
         captionColor: "#ffffff",
         highlightColor: "#fbbf24",
         textPosition: "bottom",
         backgroundStyle: "box",
-        emphasisAnimation: "pop"
+        emphasisAnimation: "pop",
+        layoutType: "crop",
+        layoutTitleText: "",
+        isMirrored: false,
+        playbackSpeed: 1.0,
       };
+
+      const speed = styleConfig.playbackSpeed || 1.0;
 
       const inputProps = {
         videoUrl: video.videoUrl,
@@ -131,7 +138,7 @@ export const renderClip = inngest.createFunction(
         styleConfig,
       };
 
-      const durationInFrames = Math.max(30, endFrame - startFrame);
+      const durationInFrames = Math.max(30, Math.round((endFrame - startFrame) / speed));
 
       // Concurrency settings to handle AWS account rate limits
       const concurrencyEnv = process.env.REMOTION_CONCURRENCY

@@ -17,6 +17,10 @@ export interface StyleConfig {
   textPosition: "bottom" | "center" | "top";
   backgroundStyle: "box" | "bar" | "none";
   emphasisAnimation: "bounce" | "pop" | "none";
+  layoutType?: "crop" | "fit_black" | "fit_white" | "blur_background";
+  layoutTitleText?: string;
+  isMirrored?: boolean;
+  playbackSpeed?: number;
 }
 
 export type ClipCompositionProps = {
@@ -37,8 +41,11 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  // Current playback time in seconds relative to the start of the clip
-  const currentTimeWithinClip = frame / fps;
+  const speed = styleConfig.playbackSpeed || 1.0;
+  const isMirrored = styleConfig.isMirrored || false;
+
+  // Current playback time in seconds relative to the start of the clip, scaled by speed
+  const currentTimeWithinClip = (frame / fps) * speed;
 
   // Absolute time in the original video
   const startTime = startFrame / fps;
@@ -118,22 +125,117 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
     "+"
   )}:wght@400;700;800;900&display=swap`;
 
+  const layout = styleConfig.layoutType || "crop";
+  const titleText = styleConfig.layoutTitleText || "";
+
+  const renderVideoLayout = () => {
+    if (layout === "blur_background") {
+      return (
+        <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+          {/* Blurred Background Video */}
+          <Video
+            src={videoUrl}
+            startFrom={startFrame}
+            endAt={endFrame}
+            muted
+            playbackRate={speed}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              filter: "blur(20px) brightness(0.6)",
+              transform: isMirrored ? "scale(1.2) scaleX(-1)" : "scale(1.2)",
+              position: "absolute",
+              inset: 0,
+            }}
+          />
+          {/* Sharp Centered Video in Foreground */}
+          <Video
+            src={videoUrl}
+            startFrom={startFrame}
+            endAt={endFrame}
+            playbackRate={speed}
+            style={{
+              width: "100%",
+              height: "auto",
+              position: "absolute",
+              top: "50%",
+              transform: isMirrored ? "translateY(-50%) scaleX(-1)" : "translateY(-50%)",
+              boxShadow: "0 10px 45px rgba(0, 0, 0, 0.65)",
+              zIndex: 5,
+            }}
+          />
+        </div>
+      );
+    }
+
+    if (layout === "fit_white" || layout === "fit_black") {
+      const isWhite = layout === "fit_white";
+      return (
+        <div style={{ position: "absolute", inset: 0, backgroundColor: isWhite ? "#ffffff" : "#000000" }}>
+          <Video
+            src={videoUrl}
+            startFrom={startFrame}
+            endAt={endFrame}
+            playbackRate={speed}
+            style={{
+              width: "100%",
+              height: "auto",
+              position: "absolute",
+              top: "50%",
+              transform: isMirrored ? "translateY(-50%) scaleX(-1)" : "translateY(-50%)",
+            }}
+          />
+        </div>
+      );
+    }
+
+    // Default Full Crop (crop)
+    return (
+      <Video
+        src={videoUrl}
+        startFrom={startFrame}
+        endAt={endFrame}
+        playbackRate={speed}
+        style={{
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          transform: isMirrored ? "scaleX(-1)" : "none",
+        }}
+      />
+    );
+  };
+
   return (
     <div style={{ flex: 1, backgroundColor: "#000", position: "relative", width: "100%", height: "100%" }}>
       {/* Dynamic Font Injection */}
       <link href={fontUrl} rel="stylesheet" />
 
-      {/* Background Video Player, cropped to 9:16 layout */}
-      <Video
-        src={videoUrl}
-        startFrom={startFrame}
-        endAt={endFrame}
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-        }}
-      />
+      {/* Render selected video layout preset */}
+      {renderVideoLayout()}
+
+      {/* Title / Hook Text Overlay (for non-crop layouts) */}
+      {layout !== "crop" && titleText && (
+        <div
+          style={{
+            position: "absolute",
+            top: "80px",
+            left: "20px",
+            right: "20px",
+            textAlign: "center",
+            color: layout === "fit_white" ? "#000000" : "#ffffff",
+            fontFamily: `'${fontFamilyName}', sans-serif`,
+            fontSize: `${Math.max(22, Math.round(styleConfig.fontSize * 0.7))}px`,
+            fontWeight: 900,
+            lineHeight: 1.3,
+            zIndex: 20,
+            textShadow: layout === "fit_white" ? "none" : "0px 2px 8px rgba(0, 0, 0, 0.8)",
+          }}
+        >
+          {titleText}
+        </div>
+      )}
 
       {/* Caption Overlay Container */}
       {activeGroup && (
@@ -152,6 +254,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
                 ? "240px 20px 120px 20px" // Top Overlay pushed down
                 : "120px 20px 380px 20px", // Bottom Overlay pushed up (Shorts safe-zone)
             pointerEvents: "none",
+            zIndex: 10,
           }}
         >
           <div

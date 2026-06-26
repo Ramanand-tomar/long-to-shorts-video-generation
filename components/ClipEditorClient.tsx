@@ -71,6 +71,10 @@ const DEFAULT_STYLE_CONFIG: StyleConfig = {
   textPosition: "bottom",
   backgroundStyle: "box",
   emphasisAnimation: "pop",
+  layoutType: "crop",
+  layoutTitleText: "",
+  isMirrored: false,
+  playbackSpeed: 1.0,
 };
 
 const FONT_FAMILIES = ["Inter", "Montserrat", "Poppins", "Oswald", "Roboto"];
@@ -195,7 +199,8 @@ export default function ClipEditorClient({
   const fps = 30;
   const startFrame = Math.round(clip.startTime * fps);
   const endFrame = Math.round(clip.endTime * fps);
-  const durationInFrames = Math.max(30, endFrame - startFrame);
+  const speed = styleConfig.playbackSpeed || 1.0;
+  const durationInFrames = Math.max(30, Math.round((endFrame - startFrame) / speed));
 
   // Auto-clear success messages
   useEffect(() => {
@@ -598,6 +603,79 @@ export default function ClipEditorClient({
                 <option value="bounce">Word Bounce Wave</option>
                 <option value="none">Standard Flat Highlight</option>
               </select>
+            </div>
+
+            <hr className="border-zinc-900/60" />
+
+            {/* Video Framing / Layout Preset selection */}
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold text-zinc-500 tracking-wider uppercase block">
+                Video Framing / Layout
+              </label>
+              <select
+                value={styleConfig.layoutType || "crop"}
+                onChange={(e) => setStyleConfig({ 
+                  ...styleConfig, 
+                  layoutType: e.target.value as "crop" | "fit_black" | "fit_white" | "blur_background" 
+                })}
+                className="w-full bg-zinc-950 border border-zinc-900 text-zinc-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500"
+              >
+                <option value="crop">Full cover crop (9:16)</option>
+                <option value="fit_black">Cinematic Letterbox (Black background)</option>
+                <option value="fit_white">Meme Canvas (White background)</option>
+                <option value="blur_background">Blurred background padding</option>
+              </select>
+            </div>
+
+            {/* Title / Hook Text Input (only for non-crop layouts) */}
+            {(styleConfig.layoutType && styleConfig.layoutType !== "crop") ? (
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold text-zinc-500 tracking-wider uppercase block">
+                  Top Title / Hook Text
+                </label>
+                <input
+                  type="text"
+                  value={styleConfig.layoutTitleText || ""}
+                  onChange={(e) => setStyleConfig({ ...styleConfig, layoutTitleText: e.target.value })}
+                  placeholder="Even ChatGPT is jealous of him..."
+                  className="w-full bg-zinc-950 border border-zinc-900 text-zinc-300 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-violet-500"
+                />
+              </div>
+            ) : null}
+
+            <hr className="border-zinc-900/60" />
+
+            {/* Video Playback Speed control */}
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold text-zinc-500 tracking-wider uppercase block">
+                Playback Speed
+              </label>
+              <select
+                value={styleConfig.playbackSpeed || 1.0}
+                onChange={(e) => setStyleConfig({ ...styleConfig, playbackSpeed: parseFloat(e.target.value) })}
+                className="w-full bg-zinc-950 border border-zinc-900 text-zinc-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500"
+              >
+                <option value="1.0">1.0x (Normal)</option>
+                <option value="1.02">1.02x (Slight shift)</option>
+                <option value="1.05">1.05x (Fast paced)</option>
+                <option value="1.1">1.10x (Energy boost)</option>
+              </select>
+            </div>
+
+            {/* Mirror/Flip Video toggle */}
+            <div className="flex items-center justify-between p-1">
+              <span className="text-[11px] font-bold text-zinc-500 tracking-wider uppercase">
+                Mirror/Flip Video
+              </span>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={styleConfig.isMirrored || false}
+                  onChange={(e) => setStyleConfig({ ...styleConfig, isMirrored: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-zinc-400 after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-600 peer-checked:after:bg-white"></div>
+              </label>
             </div>
 
           </div>
