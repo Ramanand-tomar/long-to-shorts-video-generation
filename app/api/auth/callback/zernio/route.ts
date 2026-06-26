@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   const provider = searchParams.get("provider") || "instagram";
   const state = searchParams.get("state");
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin || "http://localhost:3000";
 
   // 1. Authenticate user
   const user = await getCurrentUser();

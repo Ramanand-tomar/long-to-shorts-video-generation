@@ -7,7 +7,7 @@ import { eq, and } from "drizzle-orm";
 import { getZernioOAuthUrl, deleteZernioAccount } from "@/lib/zernio";
 import { revalidatePath } from "next/cache";
 import { QUOTAS } from "@/lib/quotas";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import crypto from "crypto";
 import { encrypt } from "@/lib/encryption";
 
@@ -34,7 +34,18 @@ export async function getOAuthConnectUrl(provider: string) {
     }
 
     // 2. Determine redirect URI
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    let appUrl = process.env.NEXT_PUBLIC_APP_URL;
+    if (!appUrl) {
+      const headersList = await headers();
+      const host = headersList.get("host");
+      const proto = headersList.get("x-forwarded-proto") || "https";
+      if (host) {
+        const protocol = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : proto;
+        appUrl = `${protocol}://${host}`;
+      } else {
+        appUrl = "http://localhost:3000";
+      }
+    }
     
     // 3. Generate a secure random state token and store it in an encrypted cookie
     const state = crypto.randomBytes(16).toString("hex");
