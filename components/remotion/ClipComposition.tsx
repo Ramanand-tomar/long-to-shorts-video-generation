@@ -44,6 +44,14 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   const speed = styleConfig.playbackSpeed || 1.0;
   const isMirrored = styleConfig.isMirrored || false;
 
+  // Generate a low-resolution background video URL to optimize performance
+  const backgroundVideoUrl = React.useMemo(() => {
+    if (videoUrl.includes("/video/upload/")) {
+      return videoUrl.replace("/video/upload/", "/video/upload/w_180,c_scale/");
+    }
+    return videoUrl;
+  }, [videoUrl]);
+
   // Current playback time in seconds relative to the start of the clip, scaled by speed
   const currentTimeWithinClip = (frame / fps) * speed;
 
@@ -134,7 +142,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
         <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
           {/* Blurred Background Video */}
           <OffthreadVideo
-            src={videoUrl}
+            src={backgroundVideoUrl}
             startFrom={startFrame}
             endAt={endFrame}
             muted
