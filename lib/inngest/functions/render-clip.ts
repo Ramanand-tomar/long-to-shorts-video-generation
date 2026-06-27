@@ -157,14 +157,9 @@ export const renderClip = inngest.createFunction(
       } else if (concurrencyEnv !== undefined) {
         concurrencyOption = concurrencyEnv;
       } else {
-        // If neither is set in environment, we calculate concurrency dynamically to keep chunks small
-        // while capping concurrency at 10 to avoid AWS "Rate Exceeded" errors on new accounts.
-        // Remotion requires that only one of concurrency or framesPerLambda is passed.
-        const isBlurLayout = styleConfig.layoutType === "blur_background";
-        const desiredFramesPerLambda = isBlurLayout ? 100 : 200;
-        const calculatedChunks = Math.ceil(durationInFrames / desiredFramesPerLambda);
-        
-        concurrencyOption = Math.min(10, Math.max(1, calculatedChunks));
+        // Default to a concurrency limit of 1 (sequential rendering) to completely avoid AWS "Rate Exceeded"
+        // errors on restricted or new AWS accounts, while leveraging fast optimized chunk rendering.
+        concurrencyOption = 1;
       }
 
       // Trigger the Remotion Lambda rendering task
