@@ -56,6 +56,7 @@ export const videosRelations = relations(videos, ({ one, many }) => ({
   }),
   analysisJobs: many(analysisJobs),
   clips: many(clips),
+  pipelineRuns: many(pipelineRuns),
 }));
 
 // 3. Analysis Jobs Table
