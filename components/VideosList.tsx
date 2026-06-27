@@ -196,9 +196,9 @@ export default function VideosList({ videos, userPlan }: VideosListProps) {
                       <span className="px-2.5 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
                         Ready
                       </span>
-                    ) : video.status === "processing" ? (
-                      <span className="px-2.5 py-0.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-bold uppercase tracking-wider">
-                        Analysing
+                    ) : ["processing", "pending", "analyzing", "rendering", "publishing"].includes(video.status) ? (
+                      <span className="px-2.5 py-0.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-bold uppercase tracking-wider animate-pulse">
+                        Processing
                       </span>
                     ) : (
                       <span className="px-2.5 py-0.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-bold uppercase tracking-wider">
