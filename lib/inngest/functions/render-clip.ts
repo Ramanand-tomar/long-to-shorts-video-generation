@@ -180,31 +180,32 @@ export const renderClip = inngest.createFunction(
         return { renderId: result.renderId, bucketName: result.bucketName };
       });
 
-      // Poll Lambda until completed or failed
-      await step.run("poll-lambda-progress", async () => {
-        let isDone = false;
-        let attempts = 0;
-        const maxAttempts = 180; // 15 minutes max (180 attempts * 5s = 900s)
+      // Poll Lambda until completed or failed using Inngest step.sleep to prevent Vercel Function timeouts
+      let isDone = false;
+      let attempts = 0;
+      const maxAttempts = 180; // 15 minutes max (180 attempts * 5s = 900s)
 
-        while (!isDone && attempts < maxAttempts) {
-          attempts++;
-          
-          const progress = await getRenderProgress({
+      while (!isDone && attempts < maxAttempts) {
+        attempts++;
+        
+        const progress = await step.run(`check-progress-${attempts}`, async () => {
+          return await getRenderProgress({
             renderId,
             bucketName,
             functionName: functionName!,
             region: awsRegion,
           });
+        });
 
-          if (progress.fatalErrorEncountered) {
-            throw new Error(`Fatal rendering error: ${progress.errors.map(e => e.message).join(", ")}`);
-          }
+        if (progress.fatalErrorEncountered) {
+          throw new Error(`Fatal rendering error: ${progress.errors.map(e => e.message).join(", ")}`);
+        }
 
-          if (progress.done) {
-            isDone = true;
-            
-            // Save final render URL
-            if (progress.outputFile) {
+        if (progress.done) {
+          isDone = true;
+          
+          if (progress.outputFile) {
+            await step.run("save-clip-url", async () => {
               await db
                 .update(clips)
                 .set({
@@ -213,19 +214,19 @@ export const renderClip = inngest.createFunction(
                   updatedAt: new Date(),
                 })
                 .where(eq(clips.id, clipId));
-            } else {
-              throw new Error("Lambda render completed but returned no output URL");
-            }
+            });
           } else {
-            // Wait 5 seconds between checks
-            await new Promise((resolve) => setTimeout(resolve, 5000));
+            throw new Error("Lambda render completed but returned no output URL");
           }
+        } else {
+          // Use Inngest native sleep to suspend execution and avoid Vercel timeouts
+          await step.sleep(`wait-5s-${attempts}`, "5s");
         }
+      }
 
-        if (!isDone) {
-          throw new Error("Rendering timed out on Remotion Lambda after 15 minutes.");
-        }
-      });
+      if (!isDone) {
+        throw new Error("Rendering timed out on Remotion Lambda after 15 minutes.");
+      }
 
       return { success: true };
     } catch (error) {
