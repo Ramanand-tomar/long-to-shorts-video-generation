@@ -154,9 +154,16 @@ export const renderClip = inngest.createFunction(
 
       if (framesPerLambdaEnv !== undefined) {
         framesPerLambdaOption = framesPerLambdaEnv;
-      } else if (concurrencyEnv !== undefined) {
+      }
+      
+      if (concurrencyEnv !== undefined) {
         concurrencyOption = concurrencyEnv;
       } else {
+        // Default to a safe concurrency limit of 10 to avoid AWS "Rate Exceeded" error on new accounts.
+        concurrencyOption = 10;
+      }
+
+      if (framesPerLambdaOption === undefined) {
         // Use adaptive chunk size based on layout complexity.
         // Blurry background layout uses 2 OffthreadVideo tags and heavy CSS blur,
         // so it requires much smaller chunks (100 frames) to prevent timeouts.
