@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, real, bigint, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, timestamp, real, bigint, jsonb, boolean } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
 // 1. Users Table
@@ -25,6 +25,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   socialConnections: many(socialConnections),
   scheduledPosts: many(scheduledPosts),
   usageLogs: many(usageLogs),
+  pipelineRuns: many(pipelineRuns),
 }));
 
 // 2. Videos Table
@@ -40,6 +41,8 @@ export const videos = pgTable("videos", {
   format: text("format"),
   cloudinaryAssetId: text("cloudinary_asset_id"),
   transcript: jsonb("transcript"),
+  sourceType: text("source_type").default("upload").notNull(), // 'upload', 'gdrive'
+  gdriveFileId: text("gdrive_file_id"),
   status: text("status").default("pending").notNull(), // 'pending', 'transcribing', 'analyzing', 'completed', 'failed'
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -90,6 +93,12 @@ export const clips = pgTable("clips", {
   captionText: text("caption_text"),
   hashtags: jsonb("hashtags"),
   reason: text("reason"),
+  youtubeTitle: text("youtube_title"),
+  youtubeDescription: text("youtube_description"),
+  youtubeTags: jsonb("youtube_tags"),
+  youtubeVideoId: text("youtube_video_id"),
+  youtubePublishedAt: timestamp("youtube_published_at"),
+  s3Deleted: boolean("s3_deleted").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -173,6 +182,32 @@ export const usageLogs = pgTable("usage_logs", {
 export const usageLogsRelations = relations(usageLogs, ({ one }) => ({
   user: one(users, {
     fields: [usageLogs.userId],
+    references: [users.id],
+  }),
+}));
+
+// 8. Pipeline Runs Table
+export const pipelineRuns = pgTable("pipeline_runs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  videoId: uuid("video_id").references(() => videos.id, { onDelete: "cascade" }).notNull(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  status: text("status").default("pending").notNull(), // 'pending', 'analyzing', 'rendering', 'publishing', 'completed', 'failed'
+  errorMessage: text("error_message"),
+  totalClips: integer("total_clips").default(0).notNull(),
+  publishedClips: integer("published_clips").default(0).notNull(),
+  completionEmailSent: boolean("completion_email_sent").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Relations for Pipeline Runs
+export const pipelineRunsRelations = relations(pipelineRuns, ({ one }) => ({
+  video: one(videos, {
+    fields: [pipelineRuns.videoId],
+    references: [videos.id],
+  }),
+  user: one(users, {
+    fields: [pipelineRuns.userId],
     references: [users.id],
   }),
 }));
