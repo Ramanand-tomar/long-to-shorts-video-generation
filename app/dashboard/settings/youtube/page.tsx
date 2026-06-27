@@ -2,7 +2,10 @@ import React from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/db/user";
-import { disconnectYouTube } from "@/actions/youtube-auth";
+import { db } from "@/lib/db";
+import { socialConnections } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
+import { getOAuthConnectUrl, disconnectPlatform } from "@/actions/social";
 import { 
   CheckCircle2, 
   AlertTriangle, 
@@ -34,11 +37,38 @@ export default async function YouTubeSettingsPage({ searchParams }: PageProps) {
   }
 
   const params = await searchParams;
-  const isConnected = !!user.youtubeRefreshToken;
+
+  // Retrieve Zernio YouTube connection status
+  const [youtubeConn] = await db
+    .select()
+    .from(socialConnections)
+    .where(
+      and(
+        eq(socialConnections.userId, user.id),
+        eq(socialConnections.platform, "youtube")
+      )
+    )
+    .limit(1);
+
+  const isConnected = !!youtubeConn;
+
+  async function handleConnect() {
+    "use server";
+    const result = await getOAuthConnectUrl("youtube");
+    if (result.success && result.authUrl) {
+      redirect(result.authUrl);
+    } else {
+      const targetUrl = new URL("/dashboard/settings/youtube", process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000");
+      targetUrl.searchParams.set("error", result.error || "Failed to initiate Zernio link.");
+      redirect(targetUrl.toString());
+    }
+  }
 
   async function handleDisconnect() {
     "use server";
-    await disconnectYouTube();
+    if (youtubeConn) {
+      await disconnectPlatform(youtubeConn.id);
+    }
   }
 
   return (
@@ -62,7 +92,7 @@ export default async function YouTubeSettingsPage({ searchParams }: PageProps) {
           YouTube Publishing Setup
         </h1>
         <p className="text-zinc-400 text-sm mt-2">
-          Link your channel directly to enable zero-click automated background uploads.
+          Link your channel via Zernio to enable zero-click automated background uploads.
         </p>
       </div>
 
@@ -71,8 +101,8 @@ export default async function YouTubeSettingsPage({ searchParams }: PageProps) {
         <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm flex items-start gap-3">
           <CheckCircle2 className="w-5 h-5 flex-shrink-0 mt-0.5" />
           <div>
-            <p className="font-bold">OAuth Connection Successful!</p>
-            <p className="text-emerald-500/80 text-xs mt-1">Your YouTube channel refresh token has been securely stored and encrypted.</p>
+            <p className="font-bold">Zernio OAuth Connection Successful!</p>
+            <p className="text-emerald-500/80 text-xs mt-1">Your YouTube channel has been securely connected via Zernio.</p>
           </div>
         </div>
       )}
@@ -97,19 +127,21 @@ export default async function YouTubeSettingsPage({ searchParams }: PageProps) {
             <div className="flex items-center gap-2 mt-1">
               <span className={`w-2.5 h-2.5 rounded-full ${isConnected ? "bg-emerald-500" : "bg-zinc-700"}`} />
               <h2 className="text-lg font-bold text-white">
-                {isConnected ? "Direct Connection Active" : "No Direct Connection"}
+                {isConnected ? "Zernio Connection Active" : "No Zernio Connection"}
               </h2>
             </div>
           </div>
 
           {!isConnected ? (
-            <Link
-              href="/api/auth/youtube/start"
-              className="px-6 py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm tracking-wide transition-all shadow-lg shadow-violet-500/20 flex items-center gap-2"
-            >
-              <ExternalLink className="w-4 h-4" />
-              Connect YouTube Channel
-            </Link>
+            <form action={handleConnect}>
+              <button
+                type="submit"
+                className="px-6 py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm tracking-wide transition-all shadow-lg shadow-violet-500/20 flex items-center gap-2"
+              >
+                <ExternalLink className="w-4 h-4" />
+                Connect YouTube Channel
+              </button>
+            </form>
           ) : (
             <form action={handleDisconnect}>
               <button
@@ -128,25 +160,25 @@ export default async function YouTubeSettingsPage({ searchParams }: PageProps) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div>
                 <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Connected Channel Name</span>
-                <p className="text-zinc-200 font-bold mt-1 text-base">{user.youtubeChannelName || "Unknown Channel"}</p>
+                <p className="text-zinc-200 font-bold mt-1 text-base">{youtubeConn.profileName || "Unknown Channel"}</p>
               </div>
               <div>
                 <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">YouTube Channel ID</span>
-                <p className="text-zinc-500 font-mono mt-1 text-xs">{user.youtubeChannelId || "Unknown ID"}</p>
+                <p className="text-zinc-500 font-mono mt-1 text-xs">{youtubeConn.platformUserId || "Unknown ID"}</p>
               </div>
             </div>
 
             <div className="p-4 bg-zinc-950/40 border border-zinc-900 rounded-2xl flex items-start gap-3">
               <ShieldCheck className="w-5 h-5 text-emerald-400 mt-0.5 flex-shrink-0" />
               <p className="text-zinc-400 text-xs leading-relaxed">
-                The direct connection is active. Rendered clips in your daily pipeline will automatically publish directly to your channel and clean up S3 storage sequentially without needing manually verified post scheduling.
+                The connection is active. Rendered clips in your daily pipeline will automatically publish directly to your channel via Zernio and clean up S3 storage sequentially without needing manually verified post scheduling.
               </p>
             </div>
           </div>
         ) : (
           <div className="pt-6">
             <p className="text-zinc-400 text-sm leading-relaxed">
-              Linking your channel grants the application permission to directly stream finished video files from your AWS S3 bucket to YouTube. No video files will be stored on your local disk or shared with third parties.
+              Linking your channel via Zernio grants the application permission to stream finished video files from your AWS S3 bucket to YouTube. No video files will be stored on your local disk or shared with third parties.
             </p>
           </div>
         )}

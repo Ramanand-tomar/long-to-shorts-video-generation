@@ -1,4 +1,4 @@
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 
 interface ClipSummary {
   title: string;
@@ -9,14 +9,22 @@ export async function sendCompletionEmail(params: {
   to: string;
   clips: ClipSummary[];
 }): Promise<void> {
-  const resendApiKey = process.env.RESEND_API_KEY;
-  if (!resendApiKey || resendApiKey.includes("placeholder") || resendApiKey.startsWith("your_")) {
-    console.warn("RESEND_API_KEY is not configured. Skipping email dispatch.");
+  // Use user-provided app password and sender email
+  const emailUser = process.env.EMAIL_USER || params.to;
+  const emailPass = (process.env.EMAIL_PASS || "nrcu bozx fvcm doli").replace(/\s+/g, "");
+
+  if (!emailUser) {
+    console.warn("No email sender configuration found. Skipping email dispatch.");
     return;
   }
 
-  const resend = new Resend(resendApiKey);
-  const notificationEmail = process.env.NOTIFICATION_EMAIL || params.to;
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: emailUser,
+      pass: emailPass,
+    },
+  });
 
   const listItemsHtml = params.clips
     .map((c) => {
@@ -57,20 +65,15 @@ export async function sendCompletionEmail(params: {
   `;
 
   try {
-    const { data, error } = await resend.emails.send({
-      from: "VidShorts Pipeline <onboarding@resend.dev>",
-      to: notificationEmail,
+    await transporter.sendMail({
+      from: `"VidShorts Pipeline" <${emailUser}>`,
+      to: params.to,
       subject: "✅ Your clips are live on YouTube!",
       html: htmlContent,
     });
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    console.log(`Pipeline completion email successfully sent to ${notificationEmail}. Email ID: ${data?.id}`);
+    console.log(`Pipeline completion email successfully sent via Gmail to ${params.to}`);
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to send completion email via Resend client: ${errorMsg}`);
+    console.error(`Failed to send completion email via Gmail SMTP: ${errorMsg}`);
   }
 }

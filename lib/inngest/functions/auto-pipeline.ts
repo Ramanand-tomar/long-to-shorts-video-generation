@@ -1,9 +1,9 @@
 import { inngest } from "../client";
 import { db } from "@/lib/db";
-import { videos, clips, pipelineRuns, users } from "@/lib/db/schema";
-import { eq, asc } from "drizzle-orm";
+import { videos, clips, pipelineRuns, users, socialConnections } from "@/lib/db/schema";
+import { eq, asc, and } from "drizzle-orm";
 import { renderMediaOnLambda, getRenderProgress, AwsRegion } from "@remotion/lambda";
-import { uploadVideoToYouTube } from "@/lib/youtube";
+import { publishToZernio } from "@/lib/zernio";
 import { deleteFileFromS3 } from "@/lib/s3";
 import { sendCompletionEmail } from "@/lib/email";
 import { StyleConfig } from "@/components/remotion/ClipComposition";
@@ -513,22 +513,42 @@ You MUST reply strictly with a JSON object (no markdown code blocks, just raw JS
             throw new Error(`Clip does not have a rendered URL: ${currentClipId}`);
           }
 
-          const [userRec] = await db
-            .select({ youtubeRefreshToken: users.youtubeRefreshToken })
-            .from(users)
-            .where(eq(users.id, userId))
+          // Retrieve user's YouTube connection linked via Zernio OAuth
+          const [youtubeConn] = await db
+            .select()
+            .from(socialConnections)
+            .where(
+              and(
+                eq(socialConnections.userId, userId),
+                eq(socialConnections.platform, "youtube")
+              )
+            )
             .limit(1);
 
-          const userRefreshToken = userRec?.youtubeRefreshToken || undefined;
+          if (!youtubeConn || !youtubeConn.externalAccountId) {
+            throw new Error(`User does not have a linked YouTube channel on Zernio. Please link it in Settings.`);
+          }
 
-          // Trigger YouTube direct upload
-          const youtubeVideoId = await uploadVideoToYouTube({
-            s3Url: clip.clipUrl,
+          // Submit post to Zernio API for YouTube
+          const zernioResult = await publishToZernio({
             title: metadata.youtubeTitle || clip.title,
-            description: metadata.youtubeDescription || clip.description || "",
-            tags: metadata.youtubeTags || [],
-            refreshToken: userRefreshToken,
-          });
+            content: metadata.youtubeDescription || clip.description || "",
+            mediaItems: [
+              {
+                type: "video",
+                url: clip.clipUrl,
+              }
+            ],
+            platforms: [
+              {
+                platform: "youtube",
+                accountId: youtubeConn.externalAccountId,
+              }
+            ],
+            publishNow: true,
+          }) as { id?: string } | undefined;
+
+          const youtubeVideoId = zernioResult?.id || "zernio_published";
 
           await db
             .update(clips)
