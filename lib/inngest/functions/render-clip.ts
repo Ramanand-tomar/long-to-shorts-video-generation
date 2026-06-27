@@ -154,22 +154,17 @@ export const renderClip = inngest.createFunction(
 
       if (framesPerLambdaEnv !== undefined) {
         framesPerLambdaOption = framesPerLambdaEnv;
-      }
-      
-      if (concurrencyEnv !== undefined) {
+      } else if (concurrencyEnv !== undefined) {
         concurrencyOption = concurrencyEnv;
       } else {
-        // Default to a safe concurrency limit of 10 to avoid AWS "Rate Exceeded" error on new accounts.
-        concurrencyOption = 10;
-      }
-
-      if (framesPerLambdaOption === undefined) {
-        // Use adaptive chunk size based on layout complexity.
-        // Blurry background layout uses 2 OffthreadVideo tags and heavy CSS blur,
-        // so it requires much smaller chunks (100 frames) to prevent timeouts.
-        // Other layouts can safely use 200 frames.
+        // If neither is set in environment, we calculate concurrency dynamically to keep chunks small
+        // while capping concurrency at 10 to avoid AWS "Rate Exceeded" errors on new accounts.
+        // Remotion requires that only one of concurrency or framesPerLambda is passed.
         const isBlurLayout = styleConfig.layoutType === "blur_background";
-        framesPerLambdaOption = isBlurLayout ? 100 : 200;
+        const desiredFramesPerLambda = isBlurLayout ? 100 : 200;
+        const calculatedChunks = Math.ceil(durationInFrames / desiredFramesPerLambda);
+        
+        concurrencyOption = Math.min(10, Math.max(1, calculatedChunks));
       }
 
       // Trigger the Remotion Lambda rendering task
