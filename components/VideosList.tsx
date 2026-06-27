@@ -2,8 +2,9 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { Film, Play, Clock, Calendar, Plus, Sparkles, Trash2, Loader2 } from "lucide-react";
+import { Film, Play, Clock, Calendar, Plus, Sparkles, Trash2, Loader2, Link2 } from "lucide-react";
 import UploadModal from "./UploadModal";
+import GoogleDriveModal from "./GoogleDriveModal";
 import { deleteVideo } from "@/actions/video";
 
 interface Video {
@@ -28,6 +29,7 @@ interface VideosListProps {
 
 export default function VideosList({ videos, userPlan }: VideosListProps) {
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [gdriveOpen, setGdriveOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleDeleteVideo = async (videoId: string) => {
@@ -86,13 +88,22 @@ export default function VideosList({ videos, userPlan }: VideosListProps) {
           <p className="text-zinc-400 text-sm mt-1">View, manage, and run AI clip analysis on your uploads.</p>
         </div>
 
-        <button
-          onClick={() => setUploadOpen(true)}
-          className="flex items-center gap-2 px-5 py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm transition-all shadow-lg shadow-violet-500/20"
-        >
-          <Plus className="w-4.5 h-4.5" />
-          Upload Video
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => setGdriveOpen(true)}
+            className="flex items-center gap-2 px-5 py-3 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white font-bold text-sm transition-all"
+          >
+            <Link2 className="w-4 h-4 text-violet-400" />
+            Add from Google Drive
+          </button>
+          <button
+            onClick={() => setUploadOpen(true)}
+            className="flex items-center gap-2 px-5 py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm transition-all shadow-lg shadow-violet-500/20"
+          >
+            <Plus className="w-4.5 h-4.5" />
+            Upload Video
+          </button>
+        </div>
       </div>
 
       {/* Videos Grid */}
@@ -105,13 +116,22 @@ export default function VideosList({ videos, userPlan }: VideosListProps) {
           <p className="text-zinc-500 text-sm max-w-sm mb-8 leading-relaxed">
             Drag and drop video files directly from your computer to Cloudinary to start clipping.
           </p>
-          <button
-            onClick={() => setUploadOpen(true)}
-            className="flex items-center gap-2 px-6 py-3.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm transition-all shadow-lg shadow-violet-500/20"
-          >
-            <Plus className="w-4.5 h-4.5" />
-            Upload Your First Video
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              onClick={() => setGdriveOpen(true)}
+              className="flex items-center gap-2 px-6 py-3.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white font-bold text-sm transition-all"
+            >
+              <Link2 className="w-4 h-4 text-violet-400" />
+              Add from Google Drive
+            </button>
+            <button
+              onClick={() => setUploadOpen(true)}
+              className="flex items-center gap-2 px-6 py-3.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm transition-all shadow-lg shadow-violet-500/20"
+            >
+              <Plus className="w-4.5 h-4.5" />
+              Upload Your First Video
+            </button>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -223,6 +243,12 @@ export default function VideosList({ videos, userPlan }: VideosListProps) {
         isOpen={uploadOpen}
         onClose={() => setUploadOpen(false)}
         userPlan={userPlan}
+      />
+
+      {/* Google Drive URL Modal */}
+      <GoogleDriveModal
+        isOpen={gdriveOpen}
+        onClose={() => setGdriveOpen(false)}
       />
     </div>
   );
