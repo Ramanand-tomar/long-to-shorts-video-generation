@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/db/user";
 import { db } from "@/lib/db";
-import { videos, analysisJobs, clips } from "@/lib/db/schema";
+import { videos, analysisJobs, clips, pipelineRuns } from "@/lib/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import VideoDetail from "@/components/VideoDetail";
+import PipelineStatusCard from "@/components/PipelineStatusCard";
 
 interface PageProps {
   params: Promise<{
@@ -35,6 +36,21 @@ export default async function VideoDetailPage({ params }: PageProps) {
 
   if (!video) {
     redirect("/dashboard/videos");
+  }
+
+  // Retrieve any associated pipeline runs
+  const [pipelineRun] = await db
+    .select()
+    .from(pipelineRuns)
+    .where(eq(pipelineRuns.videoId, videoId))
+    .limit(1);
+
+  if (video.sourceType === "gdrive" && pipelineRun) {
+    return (
+      <div className="p-6 sm:p-10 max-w-2xl mx-auto">
+        <PipelineStatusCard pipelineRunId={pipelineRun.id} />
+      </div>
+    );
   }
 
   // Retrieve any associated analysis jobs, preferring active ones or otherwise the newest

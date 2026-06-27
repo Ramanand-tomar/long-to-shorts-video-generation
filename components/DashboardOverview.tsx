@@ -30,9 +30,17 @@ interface DashboardOverviewProps {
     scheduledPosts: number;
   };
   recentLogs: LogEntry[];
+  activePipelines?: {
+    id: string;
+    videoId: string;
+    status: string;
+    totalClips: number;
+    publishedClips: number;
+    videoTitle: string;
+  }[];
 }
 
-export default function DashboardOverview({ userPlan, stats, recentLogs }: DashboardOverviewProps) {
+export default function DashboardOverview({ userPlan, stats, recentLogs, activePipelines }: DashboardOverviewProps) {
   const [uploadOpen, setUploadOpen] = useState(false);
 
   // Format activity action names to readable strings
@@ -122,6 +130,61 @@ export default function DashboardOverview({ userPlan, stats, recentLogs }: Dashb
         </div>
 
       </div>
+
+      {/* Active Pipelines */}
+      {activePipelines && activePipelines.length > 0 && (
+        <div className="bg-[#12121a] border border-zinc-800 rounded-3xl p-6 sm:p-8 space-y-6 relative overflow-hidden shadow-lg">
+          <div className="absolute top-[-50px] right-[-50px] w-36 h-36 bg-violet-600/5 rounded-full blur-[50px] pointer-events-none" />
+          
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-violet-500 animate-pulse shadow-[0_0_8px_#8b5cf6]" />
+            <h3 className="text-lg font-bold text-white tracking-tight">Active Ingestion Pipelines</h3>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {activePipelines.map((pipeline) => {
+              const percent = pipeline.totalClips > 0 
+                ? Math.round((pipeline.publishedClips / pipeline.totalClips) * 100)
+                : 0;
+
+              return (
+                <Link 
+                  key={pipeline.id} 
+                  href={`/dashboard/videos/${pipeline.videoId}`}
+                  className="p-5 rounded-2xl bg-zinc-950/40 border border-zinc-900 hover:border-zinc-800 hover:bg-zinc-900/20 transition-all block space-y-4 group"
+                >
+                  <div className="flex justify-between items-start gap-4">
+                    <div>
+                      <h4 className="text-zinc-200 font-bold text-sm line-clamp-1 group-hover:text-violet-400 transition-colors">
+                        {pipeline.videoTitle}
+                      </h4>
+                      <p className="text-[10px] text-zinc-500 uppercase font-semibold tracking-wider mt-0.5">
+                        Status: {pipeline.status}
+                      </p>
+                    </div>
+                    <span className="px-2 py-0.5 rounded bg-violet-500/10 border border-violet-500/20 text-violet-400 text-[10px] font-bold uppercase tracking-wider">
+                      {pipeline.publishedClips}/{pipeline.totalClips} Live
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="w-full h-1.5 bg-zinc-900 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-violet-600 to-fuchsia-600 rounded-full"
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[10px] text-zinc-500 font-semibold">
+                      <span>Progress</span>
+                      <span>{percent}%</span>
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Main Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

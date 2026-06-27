@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/db/user";
 import { db } from "@/lib/db";
-import { videos, clips, scheduledPosts, usageLogs } from "@/lib/db/schema";
+import { videos, clips, scheduledPosts, usageLogs, pipelineRuns } from "@/lib/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import DashboardOverview from "@/components/DashboardOverview";
 
@@ -60,6 +60,26 @@ export default async function DashboardPage() {
     .orderBy(desc(usageLogs.timestamp))
     .limit(10);
 
+  // 6. Fetch active pipeline runs (status not in completed or failed)
+  const activePipelines = await db
+    .select({
+      id: pipelineRuns.id,
+      videoId: pipelineRuns.videoId,
+      status: pipelineRuns.status,
+      totalClips: pipelineRuns.totalClips,
+      publishedClips: pipelineRuns.publishedClips,
+      videoTitle: videos.title,
+    })
+    .from(pipelineRuns)
+    .innerJoin(videos, eq(pipelineRuns.videoId, videos.id))
+    .where(
+      and(
+        eq(pipelineRuns.userId, user.id),
+        sql`${pipelineRuns.status} not in ('completed', 'failed')`
+      )
+    )
+    .orderBy(desc(pipelineRuns.createdAt));
+
   return (
     <DashboardOverview
       userPlan={user.plan}
@@ -70,6 +90,7 @@ export default async function DashboardPage() {
         scheduledPosts: scheduledPostsCount,
       }}
       recentLogs={logs}
+      activePipelines={activePipelines}
     />
   );
 }
