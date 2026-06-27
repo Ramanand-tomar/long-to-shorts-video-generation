@@ -1,9 +1,20 @@
-export async function refreshYouTubeAccessToken(): Promise<string> {
+import { decrypt } from "@/lib/encryption";
+
+export async function refreshYouTubeAccessToken(explicitRefreshToken?: string): Promise<string> {
   const clientId = process.env.YOUTUBE_CLIENT_ID;
   const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
-  const refreshToken = process.env.YOUTUBE_REFRESH_TOKEN;
+  
+  let rawRefreshToken = explicitRefreshToken || process.env.YOUTUBE_REFRESH_TOKEN;
 
-  if (!clientId || !clientSecret || !refreshToken) {
+  if (rawRefreshToken && (rawRefreshToken.startsWith("v1:") || rawRefreshToken.includes(":"))) {
+    try {
+      rawRefreshToken = decrypt(rawRefreshToken);
+    } catch (err) {
+      console.error("Failed to decrypt YouTube refresh token:", err);
+    }
+  }
+
+  if (!clientId || !clientSecret || !rawRefreshToken) {
     throw new Error("Missing YouTube OAuth credentials. Verify YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, and YOUTUBE_REFRESH_TOKEN in .env.local.");
   }
 
@@ -15,7 +26,7 @@ export async function refreshYouTubeAccessToken(): Promise<string> {
     body: new URLSearchParams({
       client_id: clientId,
       client_secret: clientSecret,
-      refresh_token: refreshToken,
+      refresh_token: rawRefreshToken,
       grant_type: "refresh_token",
     }),
   });
@@ -38,12 +49,13 @@ export async function uploadVideoToYouTube(params: {
   title: string;
   description: string;
   tags?: string[];
+  refreshToken?: string;
 }): Promise<string> {
-  const { s3Url, title, description, tags = [] } = params;
+  const { s3Url, title, description, tags = [], refreshToken } = params;
 
   console.log(`Starting YouTube upload for video: "${title}"`);
 
-  const accessToken = await refreshYouTubeAccessToken();
+  const accessToken = await refreshYouTubeAccessToken(refreshToken);
 
   const headResponse = await fetch(s3Url, { method: "HEAD" });
   if (!headResponse.ok) {

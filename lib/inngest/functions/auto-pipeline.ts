@@ -513,12 +513,21 @@ You MUST reply strictly with a JSON object (no markdown code blocks, just raw JS
             throw new Error(`Clip does not have a rendered URL: ${currentClipId}`);
           }
 
+          const [userRec] = await db
+            .select({ youtubeRefreshToken: users.youtubeRefreshToken })
+            .from(users)
+            .where(eq(users.id, userId))
+            .limit(1);
+
+          const userRefreshToken = userRec?.youtubeRefreshToken || undefined;
+
           // Trigger YouTube direct upload
           const youtubeVideoId = await uploadVideoToYouTube({
             s3Url: clip.clipUrl,
             title: metadata.youtubeTitle || clip.title,
             description: metadata.youtubeDescription || clip.description || "",
             tags: metadata.youtubeTags || [],
+            refreshToken: userRefreshToken,
           });
 
           await db

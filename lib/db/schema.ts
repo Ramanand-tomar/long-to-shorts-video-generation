@@ -15,6 +15,9 @@ export const users = pgTable("users", {
   lastRenderReset: timestamp("last_render_reset").defaultNow(),
   analysisCount24h: integer("analysis_count_24h").default(0).notNull(),
   lastAnalysisReset: timestamp("last_analysis_reset").defaultNow(),
+  youtubeRefreshToken: text("youtube_refresh_token"),
+  youtubeChannelId: text("youtube_channel_id"),
+  youtubeChannelName: text("youtube_channel_name"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
