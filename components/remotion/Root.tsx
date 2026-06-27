@@ -33,6 +33,10 @@ export const Root: React.FC = () => {
             textPosition: "bottom" as const,
             backgroundStyle: "box" as const,
             emphasisAnimation: "pop" as const,
+            layoutType: "fit_black" as const,
+            layoutTitleText: "wait for end",
+            isMirrored: true,
+            playbackSpeed: 1.02,
           },
         }}
         calculateMetadata={calculateMetadata}

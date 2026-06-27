@@ -122,10 +122,10 @@ export const renderClip = inngest.createFunction(
         textPosition: "bottom",
         backgroundStyle: "box",
         emphasisAnimation: "pop",
-        layoutType: "crop",
-        layoutTitleText: "",
-        isMirrored: false,
-        playbackSpeed: 1.0,
+        layoutType: "fit_black",
+        layoutTitleText: "wait for end",
+        isMirrored: true,
+        playbackSpeed: 1.02,
       };
 
       const speed = styleConfig.playbackSpeed || 1.0;
