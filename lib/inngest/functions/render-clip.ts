@@ -124,7 +124,7 @@ export const renderClip = inngest.createFunction(
         emphasisAnimation: "pop",
         layoutType: "fit_black",
         layoutTitleText: "wait for end",
-        isMirrored: true,
+        isMirrored: false,
         playbackSpeed: 1.02,
       };
 

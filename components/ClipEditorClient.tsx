@@ -73,7 +73,7 @@ const DEFAULT_STYLE_CONFIG: StyleConfig = {
   emphasisAnimation: "pop",
   layoutType: "fit_black",
   layoutTitleText: "wait for end",
-  isMirrored: true,
+  isMirrored: false,
   playbackSpeed: 1.02,
 };
 

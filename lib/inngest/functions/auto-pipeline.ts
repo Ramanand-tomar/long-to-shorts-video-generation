@@ -273,7 +273,7 @@ Array<{
               emphasisAnimation: "pop",
               layoutType: "fit_black",
               layoutTitleText: "wait for end",
-              isMirrored: true,
+              isMirrored: false,
               playbackSpeed: 1.02,
             },
             seoScore: c.seoScore ?? (c.confidenceScore ? Math.round(c.confidenceScore * 100) : 80),
@@ -375,7 +375,7 @@ Array<{
             emphasisAnimation: "pop",
             layoutType: "fit_black",
             layoutTitleText: "wait for end",
-            isMirrored: true,
+            isMirrored: false,
             playbackSpeed: 1.02,
           };
 

@@ -35,7 +35,7 @@ export const Root: React.FC = () => {
             emphasisAnimation: "pop" as const,
             layoutType: "fit_black" as const,
             layoutTitleText: "wait for end",
-            isMirrored: true,
+            isMirrored: false,
             playbackSpeed: 1.02,
           },
         }}
