@@ -104,6 +104,24 @@ export const autoPipeline = inngest.createFunction(
     const { videoId, userId, pipelineRunId } = event.data as EventData;
 
     try {
+      // 0. Pre-validate YouTube connection via Zernio to prevent wasteful API usage
+      await step.run("validate-youtube-connection", async () => {
+        const [youtubeConn] = await db
+          .select()
+          .from(socialConnections)
+          .where(
+            and(
+              eq(socialConnections.userId, userId),
+              eq(socialConnections.platform, "youtube")
+            )
+          )
+          .limit(1);
+
+        if (!youtubeConn) {
+          throw new Error("No connected YouTube channel found. Connect your YouTube channel in Settings first.");
+        }
+      });
+
       // 1. Update pipelineRuns to analyzing
       await step.run("update-pipeline-analyzing", async () => {
         await db

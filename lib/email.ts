@@ -10,7 +10,7 @@ export async function sendCompletionEmail(params: {
   clips: ClipSummary[];
 }): Promise<void> {
   // Use user-provided app password and sender email
-  const emailUser = process.env.EMAIL_USER || params.to;
+  const emailUser = process.env.EMAIL_USER || "nandutomar0000@gmail.com";
   const emailPass = (process.env.EMAIL_PASS || "nrcu bozx fvcm doli").replace(/\s+/g, "");
 
   if (!emailUser) {
