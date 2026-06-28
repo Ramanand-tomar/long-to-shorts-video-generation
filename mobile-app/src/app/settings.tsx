@@ -13,13 +13,14 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { getSettings, saveSettings, AppSettings } from '@/utils/storage';
-import { Shield, Link2, Folder, UserCheck, CheckCircle2 } from 'lucide-react-native';
+import { Shield, Link2, Folder, UserCheck, CheckCircle2, Globe } from 'lucide-react-native';
 
 export default function SettingsScreen() {
   const [serverUrl, setServerUrl] = useState('');
   const [userId, setUserId] = useState('');
   const [gdriveToken, setGdriveToken] = useState('');
   const [gdriveFolderId, setGdriveFolderId] = useState('');
+  const [cobaltUrl, setCobaltUrl] = useState('');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -32,6 +33,7 @@ export default function SettingsScreen() {
       setUserId(data.userId);
       setGdriveToken(data.gdriveToken);
       setGdriveFolderId(data.gdriveFolderId);
+      setCobaltUrl(data.cobaltUrl);
       setLoading(false);
     }
     load();
@@ -47,6 +49,7 @@ export default function SettingsScreen() {
         userId: userId.trim(),
         gdriveToken: gdriveToken.trim(),
         gdriveFolderId: gdriveFolderId.trim(),
+        cobaltUrl: cobaltUrl.trim(),
       });
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
@@ -157,6 +160,26 @@ export default function SettingsScreen() {
               autoCapitalize="none"
               autoCorrect={false}
             />
+          </View>
+
+          {/* Cobalt API URL Input */}
+          <View style={styles.inputGroup}>
+            <View style={styles.labelRow}>
+              <Globe size={14} color="#a1a1aa" style={styles.labelIcon} />
+              <Text style={styles.label}>Cobalt Downloader API URL</Text>
+            </View>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. https://api.cobalt.tools"
+              placeholderTextColor="#52525b"
+              value={cobaltUrl}
+              onChangeText={setCobaltUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Text style={styles.helperText}>
+              Find public nodes on instances.cobalt.best if the main server requires keys.
+            </Text>
           </View>
 
           {/* Save Button */}

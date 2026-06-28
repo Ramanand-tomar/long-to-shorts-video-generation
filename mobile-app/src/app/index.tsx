@@ -62,7 +62,7 @@ export default function HomeScreen() {
       }
 
       // 2. Resolve YouTube video download URL
-      const directUrl = await getYouTubeDirectUrl(youtubeUrl.trim());
+      const directUrl = await getYouTubeDirectUrl(youtubeUrl.trim(), settings.serverUrl);
 
       // 3. Download video to phone's local cache
       setStatus('downloading');

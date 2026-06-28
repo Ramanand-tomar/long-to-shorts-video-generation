@@ -1,50 +1,36 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
-// Public reliable cobalt API endpoints for extracting YouTube streaming links
-const COBALT_ENDPOINTS = [
-  'https://api.cobalt.tools/api/json',
-  'https://cobalt.api.red.cutie.cafe/api/json',
-];
 
 export interface DownloadProgressCallback {
   (progress: number): void;
 }
 
-export async function getYouTubeDirectUrl(youtubeUrl: string): Promise<string> {
-  let lastError = new Error('Failed to resolve YouTube URL.');
+export async function getYouTubeDirectUrl(youtubeUrl: string, serverUrl: string): Promise<string> {
+  const resolveUrl = `${serverUrl.replace(/\/$/, '')}/api/youtube/resolve`;
+  
+  console.log(`Resolving YouTube link via Next.js server resolver: ${resolveUrl}`);
+  const response = await fetch(resolveUrl, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      youtubeUrl: youtubeUrl,
+    }),
+  });
 
-  for (const endpoint of COBALT_ENDPOINTS) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url: youtubeUrl,
-          videoQuality: '720', // Best balance of speed/quality
-          filenamePattern: 'basic',
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Endpoint returned status ${response.status}`);
-      }
-
-      const data = await response.json();
-      if (data && data.url) {
-        return data.url;
-      } else if (data && data.status === 'error') {
-        throw new Error(data.text || 'Cobalt API returned error status');
-      }
-    } catch (error: any) {
-      console.warn(`Cobalt endpoint ${endpoint} failed:`, error.message);
-      lastError = error;
-    }
+  if (!response.ok) {
+    const errorJson = await response.json().catch(() => ({}));
+    throw new Error(errorJson.message || `Server resolution failed with status ${response.status}`);
   }
 
-  throw lastError;
+  const data = await response.json();
+  if (data && data.url) {
+    return data.url;
+  }
+
+  throw new Error('Resolution succeeded but server returned no stream URL.');
 }
 
 export async function downloadVideo(
