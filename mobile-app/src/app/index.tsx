@@ -10,20 +10,36 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as ImagePicker from 'expo-image-picker';
 import { ThemedView } from '@/components/themed-view';
 import { getSettings } from '@/utils/storage';
 import { getYouTubeDirectUrl, downloadVideo } from '@/utils/downloader';
 import { uploadToGoogleDrive } from '@/utils/gdrive';
-import { Play, Download, CloudUpload, Sparkles, Settings } from 'lucide-react-native';
+import { Play, Download, CloudUpload, Sparkles, Settings, FileVideo, Upload } from 'lucide-react-native';
 
 type StepStatus = 'idle' | 'resolving' | 'downloading' | 'uploading' | 'triggering' | 'completed' | 'failed';
 
+interface SelectedVideoFile {
+  uri: string;
+  name: string;
+  size?: number;
+}
+
 export default function HomeScreen() {
   const router = useRouter();
+  
+  // Tab control
+  const [activeTab, setActiveTab] = useState<'youtube' | 'file'>('youtube');
+  
+  // Inputs
   const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [selectedVideo, setSelectedVideo] = useState<SelectedVideoFile | null>(null);
+  
+  // Status states
   const [status, setStatus] = useState<StepStatus>('idle');
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const validateUrl = (url: string): boolean => {
@@ -31,19 +47,60 @@ export default function HomeScreen() {
     return ytRegex.test(url.trim());
   };
 
-  const handleProcessVideo = async () => {
-    if (!youtubeUrl.trim()) return;
+  const handlePickVideo = async () => {
+    try {
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (permissionResult.granted === false) {
+        Alert.alert(
+          'Permission Required',
+          'Permission to access your video gallery is required to select a video file.'
+        );
+        return;
+      }
 
-    if (!validateUrl(youtubeUrl)) {
-      setErrorMsg('Please enter a valid YouTube video URL.');
-      return;
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsEditing: false,
+        quality: 1,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        const uri = asset.uri;
+        const name = asset.fileName || uri.split('/').pop() || 'selected_video.mp4';
+        const size = asset.fileSize; // optional bytes
+        
+        setSelectedVideo({ uri, name, size });
+        setErrorMsg(null);
+      }
+    } catch (err) {
+      console.error('Failed to pick video:', err);
+      Alert.alert('Error', 'Failed to open video library.');
+    }
+  };
+
+  const handleProcessVideo = async () => {
+    if (activeTab === 'youtube') {
+      if (!youtubeUrl.trim()) return;
+      if (!validateUrl(youtubeUrl)) {
+        setErrorMsg('Please enter a valid YouTube video URL.');
+        return;
+      }
+    } else {
+      if (!selectedVideo) {
+        setErrorMsg('Please select a video file to upload.');
+        return;
+      }
     }
 
     setErrorMsg(null);
-    setStatus('resolving');
     setDownloadProgress(0);
+    setUploadProgress(0);
+    setStatus('idle');
 
     let localVideoUri = '';
+    let shouldDeleteLocalFile = false;
 
     try {
       // 1. Fetch connection settings
@@ -57,29 +114,41 @@ export default function HomeScreen() {
             { text: 'Cancel', style: 'cancel' }
           ]
         );
-        setStatus('idle');
         return;
       }
 
-      // 2. Resolve YouTube video download URL
-      const directUrl = await getYouTubeDirectUrl(youtubeUrl.trim(), settings.serverUrl);
-
-      // 3. Download video to phone's local cache
-      setStatus('downloading');
-      localVideoUri = await downloadVideo(directUrl, (progress) => {
-        setDownloadProgress(progress);
-      });
-
-      // 4. Upload file to Google Drive
-      setStatus('uploading');
       const timestamp = new Date().getTime();
-      const fileName = `YT_Download_${timestamp}.mp4`;
-      
+      let fileName = '';
+
+      if (activeTab === 'youtube') {
+        setStatus('resolving');
+        // 2. Resolve YouTube video download URL
+        const directUrl = await getYouTubeDirectUrl(youtubeUrl.trim(), settings.serverUrl);
+
+        // 3. Download video to phone's local cache
+        setStatus('downloading');
+        localVideoUri = await downloadVideo(directUrl, (progress) => {
+          setDownloadProgress(progress);
+        });
+        shouldDeleteLocalFile = true; // Delete cached video file
+        fileName = `YT_Download_${timestamp}.mp4`;
+      } else {
+        // Direct File Upload - use picked video file
+        localVideoUri = selectedVideo!.uri;
+        fileName = selectedVideo!.name || `Local_Upload_${timestamp}.mp4`;
+        shouldDeleteLocalFile = false; // Do NOT delete user's picked media gallery file!
+      }
+
+      // 4. Upload file to Google Drive with progress tracking
+      setStatus('uploading');
       const uploadResult = await uploadToGoogleDrive(
         localVideoUri,
         settings.gdriveToken,
         fileName,
-        settings.gdriveFolderId
+        settings.gdriveFolderId,
+        (progress) => {
+          setUploadProgress(progress);
+        }
       );
 
       // 5. Trigger Next.js backend pipeline
@@ -96,14 +165,16 @@ export default function HomeScreen() {
         }),
       });
 
-      const responseJson = await response.json();
+      const responseJson = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(responseJson.message || `Pipeline trigger failed with status ${response.status}`);
       }
 
-      // 6. Complete and clean up local file
+      // 6. Complete and clean up local file if we downloaded it
       setStatus('completed');
       setYoutubeUrl('');
+      setSelectedVideo(null);
+      
       Alert.alert(
         'Success!',
         'Video has been uploaded to Drive and the clip generation pipeline has started in the background.',
@@ -114,13 +185,13 @@ export default function HomeScreen() {
       setErrorMsg(err.message || 'An error occurred during processing.');
       setStatus('failed');
     } finally {
-      // Always cleanup local file to free storage
-      if (localVideoUri) {
+      // Always cleanup local file to free storage if it was downloaded/cached
+      if (shouldDeleteLocalFile && localVideoUri) {
         try {
           const fileInfo = await FileSystem.getInfoAsync(localVideoUri);
           if (fileInfo.exists) {
             await FileSystem.deleteAsync(localVideoUri, { idempotent: true });
-            console.log('Cleaned up local video file to free space.');
+            console.log('Cleaned up local cached video file to free space.');
           }
         } catch (cleanupErr) {
           console.warn('Failed to clean up temporary video file:', cleanupErr);
@@ -147,6 +218,20 @@ export default function HomeScreen() {
     }
   };
 
+  const getFormatSize = (bytes?: number): string => {
+    if (!bytes) return '';
+    const mb = bytes / (1024 * 1024);
+    return `${mb.toFixed(1)} MB`;
+  };
+
+  const isProcessDisabled = () => {
+    if (activeTab === 'youtube') {
+      return !youtubeUrl.trim();
+    } else {
+      return !selectedVideo;
+    }
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       {/* Header section with branding */}
@@ -157,24 +242,96 @@ export default function HomeScreen() {
         </View>
         <Text style={styles.brandingTitle}>VidShorts Automator</Text>
         <Text style={styles.brandingSubtitle}>
-          Download YouTube videos to Google Drive & auto-trigger shorts rendering.
+          Select a video source to upload and process into viral shorts.
         </Text>
+      </View>
+
+      {/* Selector Tabs */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'youtube' && styles.activeTabButton]}
+          onPress={() => {
+            if (status === 'idle' || status === 'completed' || status === 'failed') {
+              setActiveTab('youtube');
+              setErrorMsg(null);
+            }
+          }}
+        >
+          <Play size={14} color={activeTab === 'youtube' ? '#ffffff' : '#71717a'} style={{ marginRight: 6 }} />
+          <Text style={[styles.tabButtonText, activeTab === 'youtube' && styles.activeTabButtonText]}>
+            YouTube URL
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'file' && styles.activeTabButton]}
+          onPress={() => {
+            if (status === 'idle' || status === 'completed' || status === 'failed') {
+              setActiveTab('file');
+              setErrorMsg(null);
+            }
+          }}
+        >
+          <Upload size={14} color={activeTab === 'file' ? '#ffffff' : '#71717a'} style={{ marginRight: 6 }} />
+          <Text style={[styles.tabButtonText, activeTab === 'file' && styles.activeTabButtonText]}>
+            Direct File
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Main card */}
       <View style={styles.mainCard}>
-        <Text style={styles.cardTitle}>🎬 Input YouTube Link</Text>
+        <Text style={styles.cardTitle}>
+          {activeTab === 'youtube' ? '🎬 Enter YouTube Link' : '📂 Select Local Video'}
+        </Text>
         
-        <TextInput
-          style={styles.input}
-          placeholder="Paste YouTube watch URL here..."
-          placeholderTextColor="#52525b"
-          value={youtubeUrl}
-          onChangeText={setYoutubeUrl}
-          editable={status === 'idle' || status === 'completed' || status === 'failed'}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
+        {activeTab === 'youtube' ? (
+          <TextInput
+            style={styles.input}
+            placeholder="Paste YouTube watch URL here..."
+            placeholderTextColor="#52525b"
+            value={youtubeUrl}
+            onChangeText={setYoutubeUrl}
+            editable={status === 'idle' || status === 'completed' || status === 'failed'}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        ) : (
+          <View style={styles.filePickerWrapper}>
+            {selectedVideo ? (
+              <View style={styles.selectedFileBox}>
+                <FileVideo size={36} color="#c084fc" />
+                <View style={styles.fileInfoTextWrapper}>
+                  <Text style={styles.fileNameText} numberOfLines={1}>
+                    {selectedVideo.name}
+                  </Text>
+                  {selectedVideo.size && (
+                    <Text style={styles.fileSizeText}>
+                      {getFormatSize(selectedVideo.size)}
+                    </Text>
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={styles.changeFileButton}
+                  onPress={handlePickVideo}
+                  disabled={status !== 'idle' && status !== 'completed' && status !== 'failed'}
+                >
+                  <Text style={styles.changeFileButtonText}>Change</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.pickButton}
+                onPress={handlePickVideo}
+                disabled={status !== 'idle' && status !== 'completed' && status !== 'failed'}
+              >
+                <CloudUpload size={24} color="#a1a1aa" style={{ marginBottom: 8 }} />
+                <Text style={styles.pickButtonText}>Choose Video from Gallery</Text>
+                <Text style={styles.pickButtonSubtext}>MP4 format recommended</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {errorMsg && (
           <Text style={styles.errorText}>⚠️ {errorMsg}</Text>
@@ -182,12 +339,14 @@ export default function HomeScreen() {
 
         {status === 'idle' || status === 'completed' || status === 'failed' ? (
           <TouchableOpacity
-            style={[styles.processButton, !youtubeUrl.trim() && styles.disabledButton]}
+            style={[styles.processButton, isProcessDisabled() && styles.disabledButton]}
             onPress={handleProcessVideo}
-            disabled={!youtubeUrl.trim()}
+            disabled={isProcessDisabled()}
           >
-            <Play size={16} color="#ffffff" style={{ marginRight: 6 }} />
-            <Text style={styles.processButtonText}>Process Video</Text>
+            <Sparkles size={16} color="#ffffff" style={{ marginRight: 6 }} />
+            <Text style={styles.processButtonText}>
+              {activeTab === 'youtube' ? 'Process Video' : 'Upload and Trigger'}
+            </Text>
           </TouchableOpacity>
         ) : (
           <View style={styles.loadingWrapper}>
@@ -195,29 +354,39 @@ export default function HomeScreen() {
             
             {/* Visual step progress tracker */}
             <View style={styles.stepsTracker}>
-              <View style={styles.stepRow}>
-                <View style={[styles.stepDot, getStepIndicatorStyle('resolving')]} />
-                <Text style={[styles.stepLabel, status === 'resolving' && styles.activeLabel]}>Resolving Link</Text>
-              </View>
-              <View style={styles.stepConnector} />
+              {activeTab === 'youtube' && (
+                <>
+                  <View style={styles.stepRow}>
+                    <View style={[styles.stepDot, getStepIndicatorStyle('resolving')]} />
+                    <Text style={[styles.stepLabel, status === 'resolving' && styles.activeLabel]}>
+                      Resolving Link
+                    </Text>
+                  </View>
+                  <View style={styles.stepConnector} />
+                  
+                  <View style={styles.stepRow}>
+                    <View style={[styles.stepDot, getStepIndicatorStyle('downloading')]} />
+                    <Text style={[styles.stepLabel, status === 'downloading' && styles.activeLabel]}>
+                      Downloading YouTube Stream ({Math.round(downloadProgress * 100)}%)
+                    </Text>
+                  </View>
+                  <View style={styles.stepConnector} />
+                </>
+              )}
               
               <View style={styles.stepRow}>
-                <View style={[styles.stepDot, getStepIndicatorStyle('downloading')]} />
-                <Text style={[styles.stepLabel, status === 'downloading' && styles.activeLabel]}>
-                  Downloading to Temp ({Math.round(downloadProgress * 100)}%)
+                <View style={[styles.stepDot, getStepIndicatorStyle('uploading')]} />
+                <Text style={[styles.stepLabel, status === 'uploading' && styles.activeLabel]}>
+                  Uploading to Drive ({Math.round(uploadProgress * 100)}%)
                 </Text>
               </View>
               <View style={styles.stepConnector} />
               
               <View style={styles.stepRow}>
-                <View style={[styles.stepDot, getStepIndicatorStyle('uploading')]} />
-                <Text style={[styles.stepLabel, status === 'uploading' && styles.activeLabel]}>Uploading to Drive</Text>
-              </View>
-              <View style={styles.stepConnector} />
-              
-              <View style={styles.stepRow}>
                 <View style={[styles.stepDot, getStepIndicatorStyle('triggering')]} />
-                <Text style={[styles.stepLabel, status === 'triggering' && styles.activeLabel]}>Triggering Pipeline</Text>
+                <Text style={[styles.stepLabel, status === 'triggering' && styles.activeLabel]}>
+                  Triggering Pipeline
+                </Text>
               </View>
             </View>
           </View>
@@ -244,7 +413,7 @@ const styles = StyleSheet.create({
   brandingHeader: {
     alignItems: 'center',
     marginTop: 40,
-    marginBottom: 32,
+    marginBottom: 24,
   },
   logoBadge: {
     flexDirection: 'row',
@@ -278,6 +447,36 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     maxWidth: 280,
   },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#12121a',
+    borderWidth: 1,
+    borderColor: '#1e1e2d',
+    borderRadius: 20,
+    padding: 6,
+    marginBottom: 18,
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 14,
+  },
+  activeTabButton: {
+    backgroundColor: '#1c192d',
+    borderWidth: 1,
+    borderColor: '#2d294a',
+  },
+  tabButtonText: {
+    color: '#71717a',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  activeTabButtonText: {
+    color: '#ffffff',
+  },
   mainCard: {
     backgroundColor: '#12121a',
     borderWidth: 1,
@@ -292,7 +491,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   cardTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
     color: '#ffffff',
     marginBottom: 16,
@@ -306,13 +505,70 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     color: '#ffffff',
     fontSize: 14,
-    marginBottom: 12,
+    marginBottom: 16,
+  },
+  filePickerWrapper: {
+    marginBottom: 16,
+  },
+  pickButton: {
+    backgroundColor: '#161622',
+    borderWidth: 1,
+    borderColor: '#27273a',
+    borderStyle: 'dashed',
+    borderRadius: 18,
+    paddingVertical: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickButtonText: {
+    color: '#e4e4e7',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  pickButtonSubtext: {
+    color: '#52525b',
+    fontSize: 11,
+    marginTop: 4,
+  },
+  selectedFileBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#161622',
+    borderWidth: 1,
+    borderColor: '#27273a',
+    borderRadius: 18,
+    padding: 16,
+    gap: 12,
+  },
+  fileInfoTextWrapper: {
+    flex: 1,
+  },
+  fileNameText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  fileSizeText: {
+    color: '#a1a1aa',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  changeFileButton: {
+    backgroundColor: '#27273a',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  changeFileButtonText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   errorText: {
     color: '#f87171',
     fontSize: 12,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: 16,
     paddingLeft: 4,
   },
   processButton: {
@@ -389,9 +645,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   infoCard: {
-    backgroundColor: '#161622/40',
+    backgroundColor: 'rgba(22, 22, 34, 0.4)',
     borderWidth: 1,
-    borderColor: '#212235',
+    borderColor: '#1e1e2d',
     borderRadius: 22,
     padding: 20,
   },

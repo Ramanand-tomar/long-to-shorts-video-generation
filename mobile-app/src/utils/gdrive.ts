@@ -5,26 +5,43 @@ export interface UploadResult {
   driveUrl: string;
 }
 
+export interface UploadProgressCallback {
+  (progress: number): void;
+}
+
 export async function uploadToGoogleDrive(
   fileUri: string,
   accessToken: string,
   fileName: string,
-  folderId?: string
+  folderId?: string,
+  onProgress?: UploadProgressCallback
 ): Promise<UploadResult> {
   const uploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=media';
 
-  // 1. Upload raw binary file to Google Drive
-  const response = await FileSystem.uploadAsync(uploadUrl, fileUri, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
+  // 1. Upload raw binary file to Google Drive with progress tracking
+  const uploadTask = FileSystem.createUploadTask(
+    uploadUrl,
+    fileUri,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      httpMethod: 'POST',
+      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+      mimeType: 'video/mp4',
     },
-    httpMethod: 'POST',
-    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-    mimeType: 'video/mp4',
-  });
+    (data) => {
+      if (onProgress && data.totalBytesExpectedToSend > 0) {
+        const progress = data.totalBytesSent / data.totalBytesExpectedToSend;
+        onProgress(progress);
+      }
+    }
+  );
 
-  if (response.status < 200 || response.status >= 300) {
-    throw new Error(`Google Drive upload failed with status code ${response.status}: ${response.body}`);
+  const response = await uploadTask.uploadAsync();
+
+  if (!response || response.status < 200 || response.status >= 300) {
+    throw new Error(`Google Drive upload failed with status code ${response ? response.status : 'unknown'}: ${response ? response.body : ''}`);
   }
 
   const responseJson = JSON.parse(response.body);
