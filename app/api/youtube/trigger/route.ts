@@ -6,7 +6,8 @@ import { inngest } from "@/lib/inngest/client";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { driveUrl, videoUrl, cloudinaryAssetId, userId } = body;
+    const { driveUrl, videoUrl, cloudinaryAssetId, userId, triggerPipeline } = body;
+    const shouldTrigger = triggerPipeline !== false;
 
     if (!userId) {
       return NextResponse.json(
@@ -64,9 +65,17 @@ export async function POST(req: NextRequest) {
         sourceType: finalSourceType,
         gdriveFileId: finalGdriveFileId,
         cloudinaryAssetId: finalCloudinaryAssetId,
-        status: "pending",
+        status: shouldTrigger ? "pending" : "ready",
       })
       .returning();
+
+    if (!shouldTrigger) {
+      return NextResponse.json({
+        success: true,
+        videoId: newVideo.id,
+        pipelineTriggered: false,
+      });
+    }
 
     const [newRun] = await db
       .insert(pipelineRuns)
@@ -90,6 +99,7 @@ export async function POST(req: NextRequest) {
       success: true,
       videoId: newVideo.id,
       pipelineRunId: newRun.id,
+      pipelineTriggered: true,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";

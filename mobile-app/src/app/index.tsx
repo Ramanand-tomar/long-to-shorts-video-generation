@@ -41,6 +41,7 @@ export default function HomeScreen() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [autoTrigger, setAutoTrigger] = useState(true);
 
   const validateUrl = (url: string): boolean => {
     const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
@@ -172,6 +173,7 @@ export default function HomeScreen() {
           videoUrl: uploadResult.secureUrl,
           cloudinaryAssetId: uploadResult.publicId,
           userId: settings.userId,
+          triggerPipeline: autoTrigger,
         }),
       });
 
@@ -347,6 +349,19 @@ export default function HomeScreen() {
           <Text style={styles.errorText}>⚠️ {errorMsg}</Text>
         )}
 
+        {/* Toggle Switch for Auto-Trigger */}
+        {(status === 'idle' || status === 'completed' || status === 'failed') && (
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>Auto-trigger clipping pipeline</Text>
+            <TouchableOpacity
+              style={[styles.toggleSwitch, autoTrigger ? styles.toggleSwitchOn : styles.toggleSwitchOff]}
+              onPress={() => setAutoTrigger(!autoTrigger)}
+            >
+              <View style={[styles.toggleThumb, autoTrigger ? styles.toggleThumbOn : styles.toggleThumbOff]} />
+            </TouchableOpacity>
+          </View>
+        )}
+
         {status === 'idle' || status === 'completed' || status === 'failed' ? (
           <TouchableOpacity
             style={[styles.processButton, isProcessDisabled() && styles.disabledButton]}
@@ -355,7 +370,9 @@ export default function HomeScreen() {
           >
             <Sparkles size={16} color="#ffffff" style={{ marginRight: 6 }} />
             <Text style={styles.processButtonText}>
-              {activeTab === 'youtube' ? 'Process Video' : 'Upload and Trigger'}
+              {activeTab === 'youtube'
+                ? (autoTrigger ? 'Process Video' : 'Add YouTube Video')
+                : (autoTrigger ? 'Upload and Trigger' : 'Upload Video Only')}
             </Text>
           </TouchableOpacity>
         ) : (
@@ -395,7 +412,7 @@ export default function HomeScreen() {
               <View style={styles.stepRow}>
                 <View style={[styles.stepDot, getStepIndicatorStyle('triggering')]} />
                 <Text style={[styles.stepLabel, status === 'triggering' && styles.activeLabel]}>
-                  Triggering Pipeline
+                  {autoTrigger ? 'Triggering Pipeline' : 'Registering in Database'}
                 </Text>
               </View>
             </View>
@@ -671,5 +688,47 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#71717a',
     lineHeight: 16,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#161622',
+    borderWidth: 1,
+    borderColor: '#27273a',
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 16,
+  },
+  toggleLabel: {
+    color: '#a1a1aa',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  toggleSwitch: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    padding: 2,
+    justifyContent: 'center',
+  },
+  toggleSwitchOn: {
+    backgroundColor: '#7c3aed',
+  },
+  toggleSwitchOff: {
+    backgroundColor: '#27273a',
+  },
+  toggleThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#ffffff',
+  },
+  toggleThumbOn: {
+    alignSelf: 'flex-end',
+  },
+  toggleThumbOff: {
+    alignSelf: 'flex-start',
   },
 });

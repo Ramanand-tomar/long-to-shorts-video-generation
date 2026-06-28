@@ -13,17 +13,12 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { getSettings, saveSettings, AppSettings } from '@/utils/storage';
-import { Shield, Link2, Folder, UserCheck, CheckCircle2, Globe } from 'lucide-react-native';
+import { Link2, UserCheck, CheckCircle2 } from 'lucide-react-native';
 
 export default function SettingsScreen() {
   const [serverUrl, setServerUrl] = useState('');
   const [userId, setUserId] = useState('');
-  const [gdriveToken, setGdriveToken] = useState('');
-  const [gdriveFolderId, setGdriveFolderId] = useState('');
-  const [cobaltUrl, setCobaltUrl] = useState('');
-  const [gdriveRefreshToken, setGdriveRefreshToken] = useState('');
-  const [gdriveClientId, setGdriveClientId] = useState('');
-  const [gdriveClientSecret, setGdriveClientSecret] = useState('');
+  const [originalSettings, setOriginalSettings] = useState<AppSettings | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -34,12 +29,7 @@ export default function SettingsScreen() {
       const data = await getSettings();
       setServerUrl(data.serverUrl);
       setUserId(data.userId);
-      setGdriveToken(data.gdriveToken);
-      setGdriveFolderId(data.gdriveFolderId);
-      setCobaltUrl(data.cobaltUrl);
-      setGdriveRefreshToken(data.gdriveRefreshToken);
-      setGdriveClientId(data.gdriveClientId);
-      setGdriveClientSecret(data.gdriveClientSecret);
+      setOriginalSettings(data);
       setLoading(false);
     }
     load();
@@ -51,15 +41,10 @@ export default function SettingsScreen() {
 
     try {
       await saveSettings({
+        ...(originalSettings || {}),
         serverUrl: serverUrl.trim(),
         userId: userId.trim(),
-        gdriveToken: gdriveToken.trim(),
-        gdriveFolderId: gdriveFolderId.trim(),
-        cobaltUrl: cobaltUrl.trim(),
-        gdriveRefreshToken: gdriveRefreshToken.trim(),
-        gdriveClientId: gdriveClientId.trim(),
-        gdriveClientSecret: gdriveClientSecret.trim(),
-      });
+      } as AppSettings);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
@@ -132,122 +117,7 @@ export default function SettingsScreen() {
             />
           </View>
 
-           {/* Google Drive Token Input */}
-          <View style={styles.inputGroup}>
-            <View style={styles.labelRow}>
-              <Shield size={14} color="#a1a1aa" style={styles.labelIcon} />
-              <Text style={styles.label}>Google Drive Access Token (1 hour limit)</Text>
-            </View>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Paste Google Drive OAuth Access Token"
-              placeholderTextColor="#52525b"
-              value={gdriveToken}
-              onChangeText={setGdriveToken}
-              multiline
-              numberOfLines={3}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <Text style={styles.helperText}>
-              Used as fallback if no Refresh Token is provided below.
-            </Text>
-          </View>
-
-          {/* Google Drive Refresh Token Input */}
-          <View style={styles.inputGroup}>
-            <View style={styles.labelRow}>
-              <Shield size={14} color="#a1a1aa" style={styles.labelIcon} />
-              <Text style={styles.label}>Google Drive Refresh Token (Indefinite)</Text>
-            </View>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Paste Google Drive OAuth Refresh Token for auto-renewals"
-              placeholderTextColor="#52525b"
-              value={gdriveRefreshToken}
-              onChangeText={setGdriveRefreshToken}
-              multiline
-              numberOfLines={3}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <Text style={styles.helperText}>
-              Recommended. The app will automatically generate fresh access tokens on every upload using your client credentials!
-            </Text>
-          </View>
-
-          {/* Google OAuth Client ID Input */}
-          <View style={styles.inputGroup}>
-            <View style={styles.labelRow}>
-              <Shield size={14} color="#a1a1aa" style={styles.labelIcon} />
-              <Text style={styles.label}>Google Client ID (Offline Use)</Text>
-            </View>
-            <TextInput
-              style={styles.input}
-              placeholder="Paste Google OAuth Client ID"
-              placeholderTextColor="#52525b"
-              value={gdriveClientId}
-              onChangeText={setGdriveClientId}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          </View>
-
-          {/* Google OAuth Client Secret Input */}
-          <View style={styles.inputGroup}>
-            <View style={styles.labelRow}>
-              <Shield size={14} color="#a1a1aa" style={styles.labelIcon} />
-              <Text style={styles.label}>Google Client Secret (Offline Use)</Text>
-            </View>
-            <TextInput
-              style={styles.input}
-              placeholder="Paste Google OAuth Client Secret"
-              placeholderTextColor="#52525b"
-              value={gdriveClientSecret}
-              onChangeText={setGdriveClientSecret}
-              autoCapitalize="none"
-              autoCorrect={false}
-              secureTextEntry
-            />
-          </View>
-
-          {/* Google Folder ID Input */}
-          <View style={styles.inputGroup}>
-            <View style={styles.labelRow}>
-              <Folder size={14} color="#a1a1aa" style={styles.labelIcon} />
-              <Text style={styles.label}>Target Folder ID (Optional)</Text>
-            </View>
-            <TextInput
-              style={styles.input}
-              placeholder="Folder ID to upload videos inside"
-              placeholderTextColor="#52525b"
-              value={gdriveFolderId}
-              onChangeText={setGdriveFolderId}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          </View>
-
-          {/* Cobalt API URL Input */}
-          <View style={styles.inputGroup}>
-            <View style={styles.labelRow}>
-              <Globe size={14} color="#a1a1aa" style={styles.labelIcon} />
-              <Text style={styles.label}>Cobalt Downloader API URL</Text>
-            </View>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. https://api.cobalt.tools"
-              placeholderTextColor="#52525b"
-              value={cobaltUrl}
-              onChangeText={setCobaltUrl}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <Text style={styles.helperText}>
-              Find public nodes on instances.cobalt.best if the main server requires keys.
-            </Text>
-          </View>
-
+ 
           {/* Save Button */}
           <TouchableOpacity
             style={styles.button}
