@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { clips, videos } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import ClipEditorClient from "@/components/ClipEditorClient";
+import { getPlayableUrl } from "@/lib/s3";
 
 interface PageProps {
   params: Promise<{
@@ -68,7 +69,7 @@ export default async function ClipDetailPage({ params }: PageProps) {
       clip={{
         ...clip,
         subtitleStyle: clip.subtitleStyle || null,
-        clipUrl: clip.clipUrl || null,
+        clipUrl: await getPlayableUrl(clip.clipUrl),
       }}
       video={video}
       transcriptSegments={clipWords}

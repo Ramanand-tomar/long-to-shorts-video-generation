@@ -7,6 +7,7 @@ import { eq, and, gte } from "drizzle-orm";
 import { inngest } from "@/lib/inngest/client";
 import { revalidatePath } from "next/cache";
 import { QUOTAS } from "@/lib/quotas";
+import { getPlayableUrl } from "@/lib/s3";
 
 /**
  * Persists the subtitle style configuration for a clip.
@@ -186,7 +187,7 @@ export async function getRenderStatus(clipId: string) {
     return {
       success: true,
       status: clip.renderStatus,
-      clipUrl: clip.clipUrl,
+      clipUrl: await getPlayableUrl(clip.clipUrl),
     };
   } catch (error) {
     console.error("Failed to get render status:", error);

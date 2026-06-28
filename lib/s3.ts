@@ -1,4 +1,5 @@
-import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, DeleteObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const region = process.env.REMOTION_AWS_REGION || "us-east-1";
 const accessKeyId = process.env.REMOTION_AWS_ACCESS_KEY_ID;
@@ -49,4 +50,40 @@ export async function deleteFileFromS3(fileUrl: string): Promise<void> {
   );
   
   console.log(`Successfully deleted S3 object: ${key} from bucket: ${bucketName}`);
+}
+
+/**
+ * Generates a secure, temporary presigned URL for private S3 assets.
+ * Falls back gracefully to the raw URL if the asset is not in S3 or credentials are missing.
+ */
+export async function getPlayableUrl(fileUrl: string | null | undefined): Promise<string> {
+  if (!fileUrl) return "";
+  
+  const isS3 = fileUrl.includes("s3.amazonaws.com") || fileUrl.includes(".s3.");
+  if (!isS3) {
+    return fileUrl;
+  }
+  
+  if (!s3Client) {
+    return fileUrl;
+  }
+  
+  try {
+    const { bucketName, key } = getS3BucketAndKey(fileUrl);
+    if (!bucketName || !key) {
+      return fileUrl;
+    }
+    
+    const command = new GetObjectCommand({
+      Bucket: bucketName,
+      Key: key,
+    });
+    
+    // URL expires in 2 hours (7200 seconds)
+    const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 7200 });
+    return signedUrl;
+  } catch (error) {
+    console.error("Failed to generate presigned S3 URL:", error);
+    return fileUrl;
+  }
 }

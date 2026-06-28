@@ -6,6 +6,7 @@ import { getCurrentUser } from "@/lib/db/user";
 import { eq, and, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { inngest } from "@/lib/inngest/client";
+import { getPlayableUrl } from "@/lib/s3";
 
 interface SchedulePostPayload {
   clipId: string;
@@ -248,7 +249,7 @@ export async function getCompletedClips() {
       return [];
     }
 
-    return await db
+    const results = await db
       .select({
         id: clips.id,
         title: clips.title,
@@ -267,6 +268,13 @@ export async function getCompletedClips() {
           eq(clips.renderStatus, "completed")
         )
       );
+
+    return await Promise.all(
+      results.map(async (c) => ({
+        ...c,
+        clipUrl: await getPlayableUrl(c.clipUrl),
+      }))
+    );
   } catch (error) {
     console.error("Failed to retrieve completed clips:", error);
     return [];
@@ -283,7 +291,7 @@ export async function getScheduledPosts() {
       return [];
     }
 
-    return await db
+    const results = await db
       .select({
         id: scheduledPosts.id,
         caption: scheduledPosts.caption,
@@ -299,6 +307,13 @@ export async function getScheduledPosts() {
       .innerJoin(clips, eq(scheduledPosts.clipId, clips.id))
       .innerJoin(socialConnections, eq(scheduledPosts.connectionId, socialConnections.id))
       .where(eq(scheduledPosts.userId, user.id));
+
+    return await Promise.all(
+      results.map(async (p) => ({
+        ...p,
+        clipUrl: await getPlayableUrl(p.clipUrl),
+      }))
+    );
   } catch (error) {
     console.error("Failed to retrieve scheduled posts:", error);
     return [];

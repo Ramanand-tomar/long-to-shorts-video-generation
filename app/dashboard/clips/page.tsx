@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { clips, videos } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import ClipsList from "@/components/ClipsList";
+import { getPlayableUrl } from "@/lib/s3";
 
 export default async function ClipsPage() {
   const user = await getCurrentUser();
@@ -32,5 +33,12 @@ export default async function ClipsPage() {
     .where(eq(videos.userId, user.id))
     .orderBy(desc(clips.createdAt));
 
-  return <ClipsList clips={userClips} />;
+  const resolvedClips = await Promise.all(
+    userClips.map(async (c) => ({
+      ...c,
+      clipUrl: await getPlayableUrl(c.clipUrl),
+    }))
+  );
+
+  return <ClipsList clips={resolvedClips} />;
 }

@@ -5,6 +5,7 @@ import { videos, analysisJobs, clips, pipelineRuns } from "@/lib/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import VideoDetail from "@/components/VideoDetail";
 import PipelineStatusCard from "@/components/PipelineStatusCard";
+import { getPlayableUrl } from "@/lib/s3";
 
 interface PageProps {
   params: Promise<{
@@ -71,11 +72,18 @@ export default async function VideoDetailPage({ params }: PageProps) {
     .where(eq(clips.videoId, videoId))
     .orderBy(clips.startTime);
 
+  const resolvedClips = await Promise.all(
+    videoClips.map(async (c) => ({
+      ...c,
+      clipUrl: await getPlayableUrl(c.clipUrl),
+    }))
+  );
+
   return (
     <VideoDetail
       video={video}
       analysisJob={job || null}
-      clips={videoClips}
+      clips={resolvedClips}
     />
   );
 }
