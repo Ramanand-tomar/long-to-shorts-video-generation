@@ -598,7 +598,7 @@ You MUST reply strictly with a JSON object (no markdown code blocks, just raw JS
 
         // Sleep before the next clip (except the last one)
         if (i < totalClips - 1) {
-          await step.sleep(`sleep-before-next-${i}`, "1h");
+          await step.sleep(`sleep-before-next-${i}`, "1m");
         }
       }
 
