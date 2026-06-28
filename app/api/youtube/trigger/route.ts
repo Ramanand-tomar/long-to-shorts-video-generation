@@ -6,40 +6,64 @@ import { inngest } from "@/lib/inngest/client";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { driveUrl, userId } = body;
+    const { driveUrl, videoUrl, cloudinaryAssetId, userId } = body;
 
-    if (!driveUrl || !userId) {
+    if (!userId) {
       return NextResponse.json(
-        { error: "missing_fields", message: "Both driveUrl and userId are required." },
+        { error: "missing_fields", message: "userId is required." },
         { status: 400 }
       );
     }
 
-    // Extract fileId from Google Drive URL
-    const driveRegex = /(?:\/file\/d\/|id=)([^/?#]+)/;
-    const match = driveUrl.match(driveRegex);
-    const fileId = match ? match[1] : null;
+    let finalVideoUrl = "";
+    let finalSourceType = "";
+    let finalGdriveFileId: string | null = null;
+    let finalCloudinaryAssetId: string | null = null;
+    let finalTitle = "";
+    let finalFileName = "";
 
-    if (!fileId) {
+    if (driveUrl) {
+      // Extract fileId from Google Drive URL
+      const driveRegex = /(?:\/file\/d\/|id=)([^/?#]+)/;
+      const match = driveUrl.match(driveRegex);
+      const fileId = match ? match[1] : null;
+
+      if (!fileId) {
+        return NextResponse.json(
+          { error: "invalid_drive_url", message: "Failed to extract file ID from Google Drive URL." },
+          { status: 400 }
+        );
+      }
+
+      finalVideoUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+      finalSourceType = "gdrive";
+      finalGdriveFileId = fileId;
+      finalTitle = `GDrive Video - ${fileId}`;
+      finalFileName = `${fileId}.mp4`;
+    } else if (videoUrl) {
+      finalVideoUrl = videoUrl;
+      finalSourceType = "cloudinary";
+      finalCloudinaryAssetId = cloudinaryAssetId || null;
+      finalTitle = `Uploaded Video - ${new Date().getTime()}`;
+      finalFileName = `Upload_${new Date().getTime()}.mp4`;
+    } else {
       return NextResponse.json(
-        { error: "invalid_drive_url", message: "Failed to extract file ID from Google Drive URL." },
+        { error: "missing_fields", message: "Either driveUrl or videoUrl is required." },
         { status: 400 }
       );
     }
 
-    const directUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
-
-    const title = `GDrive Video - ${fileId}`;
     const [newVideo] = await db
       .insert(videos)
       .values({
         userId: userId,
-        title: title,
-        fileName: `${fileId}.mp4`,
+        title: finalTitle,
+        fileName: finalFileName,
         fileSize: 0,
-        videoUrl: directUrl,
-        sourceType: "gdrive",
-        gdriveFileId: fileId,
+        videoUrl: finalVideoUrl,
+        sourceType: finalSourceType,
+        gdriveFileId: finalGdriveFileId,
+        cloudinaryAssetId: finalCloudinaryAssetId,
         status: "pending",
       })
       .returning();

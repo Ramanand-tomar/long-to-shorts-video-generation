@@ -7,6 +7,7 @@ import { publishToZernio } from "@/lib/zernio";
 import { deleteFileFromS3 } from "@/lib/s3";
 import { sendCompletionEmail } from "@/lib/email";
 import { StyleConfig } from "@/components/remotion/ClipComposition";
+import { v2 as cloudinary } from 'cloudinary';
 
 interface EventData {
   videoId: string;
@@ -672,6 +673,29 @@ You MUST reply strictly with a JSON object (no markdown code blocks, just raw JS
 
       // 8. Finalize Pipeline & Video Status
       await step.run("finalize-pipeline", async () => {
+        try {
+          const [videoRecord] = await db
+            .select()
+            .from(videos)
+            .where(eq(videos.id, videoId))
+            .limit(1);
+
+          if (videoRecord && videoRecord.cloudinaryAssetId) {
+            console.log(`Destroying Cloudinary asset to free space: ${videoRecord.cloudinaryAssetId}`);
+            cloudinary.config({
+              cloud_name: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
+              api_key: process.env.CLOUDINARY_API_KEY,
+              api_secret: process.env.CLOUDINARY_API_SECRET,
+            });
+            const destroyRes = await cloudinary.uploader.destroy(videoRecord.cloudinaryAssetId, {
+              resource_type: 'video',
+            });
+            console.log('Cloudinary destroy result:', destroyRes);
+          }
+        } catch (cloudinaryErr) {
+          console.error('Failed to delete video from Cloudinary:', cloudinaryErr);
+        }
+
         await db
           .update(pipelineRuns)
           .set({
@@ -693,6 +717,28 @@ You MUST reply strictly with a JSON object (no markdown code blocks, just raw JS
     } catch (error) {
       console.error("Auto-Pipeline workflow failed:", error);
       const errMsg = error instanceof Error ? error.message : "Unknown error in auto-pipeline";
+
+      // Try to clean up Cloudinary video if we failed
+      try {
+        const [videoRecord] = await db
+          .select()
+          .from(videos)
+          .where(eq(videos.id, videoId))
+          .limit(1);
+        if (videoRecord && videoRecord.cloudinaryAssetId) {
+          console.log(`Pipeline failed. Cleaning up Cloudinary asset to free space: ${videoRecord.cloudinaryAssetId}`);
+          cloudinary.config({
+            cloud_name: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
+            api_key: process.env.CLOUDINARY_API_KEY,
+            api_secret: process.env.CLOUDINARY_API_SECRET,
+          });
+          await cloudinary.uploader.destroy(videoRecord.cloudinaryAssetId, {
+            resource_type: 'video',
+          });
+        }
+      } catch (cleanupErr) {
+        console.error("Failed to clean up Cloudinary asset after failure:", cleanupErr);
+      }
 
       await db
         .update(pipelineRuns)

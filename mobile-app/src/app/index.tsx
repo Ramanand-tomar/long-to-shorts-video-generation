@@ -15,7 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ThemedView } from '@/components/themed-view';
 import { getSettings } from '@/utils/storage';
 import { getYouTubeDirectUrl, downloadVideo } from '@/utils/downloader';
-import { uploadToGoogleDrive, refreshAccessToken } from '@/utils/gdrive';
+import { uploadToCloudinary } from '@/utils/cloudinary';
 import { Play, Download, CloudUpload, Sparkles, Settings, FileVideo, Upload } from 'lucide-react-native';
 
 type StepStatus = 'idle' | 'resolving' | 'downloading' | 'uploading' | 'triggering' | 'completed' | 'failed';
@@ -105,10 +105,10 @@ export default function HomeScreen() {
     try {
       // 1. Fetch connection settings
       const settings = await getSettings();
-      if (!settings.serverUrl || !settings.userId || (!settings.gdriveToken && !settings.gdriveRefreshToken)) {
+      if (!settings.serverUrl || !settings.userId) {
         Alert.alert(
           'Missing Settings',
-          'Please configure your Server URL, User ID, and either Google Drive Access Token or Refresh Token in Settings first.',
+          'Please configure your Server URL and User ID in Settings first.',
           [
             { text: 'Go to Settings', onPress: () => router.push('/settings') },
             { text: 'Cancel', style: 'cancel' }
@@ -117,24 +117,21 @@ export default function HomeScreen() {
         return;
       }
 
-      let activeAccessToken = settings.gdriveToken;
-      if (settings.gdriveRefreshToken) {
-        if (!settings.gdriveClientId || !settings.gdriveClientSecret) {
-          throw new Error('Google Drive Client ID and Client Secret must be configured in Settings to use a Refresh Token.');
-        }
-        setStatus('resolving');
-        activeAccessToken = await refreshAccessToken(
-          settings.gdriveRefreshToken,
-          settings.gdriveClientId,
-          settings.gdriveClientSecret
-        );
+      // Fetch Cloudinary configs dynamically from Next.js backend
+      setStatus('resolving');
+      const configRes = await fetch(`${settings.serverUrl.replace(/\/$/, '')}/api/youtube/config`);
+      if (!configRes.ok) {
+        throw new Error(`Failed to load Cloudinary config from server: status ${configRes.status}`);
+      }
+      const { cloudName, uploadPreset } = await configRes.json().catch(() => ({}));
+      if (!cloudName || !uploadPreset) {
+        throw new Error('Cloudinary credentials are not configured on your Next.js server. Please check your .env.local file.');
       }
 
       const timestamp = new Date().getTime();
       let fileName = '';
 
       if (activeTab === 'youtube') {
-        setStatus('resolving');
         // 2. Resolve YouTube video download URL
         const directUrl = await getYouTubeDirectUrl(youtubeUrl.trim(), settings.serverUrl);
 
@@ -152,13 +149,12 @@ export default function HomeScreen() {
         shouldDeleteLocalFile = false; // Do NOT delete user's picked media gallery file!
       }
 
-      // 4. Upload file to Google Drive with progress tracking
+      // 4. Upload file to Cloudinary with progress tracking
       setStatus('uploading');
-      const uploadResult = await uploadToGoogleDrive(
+      const uploadResult = await uploadToCloudinary(
         localVideoUri,
-        activeAccessToken,
-        fileName,
-        settings.gdriveFolderId,
+        cloudName,
+        uploadPreset,
         (progress) => {
           setUploadProgress(progress);
         }
@@ -173,7 +169,8 @@ export default function HomeScreen() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          driveUrl: uploadResult.driveUrl,
+          videoUrl: uploadResult.secureUrl,
+          cloudinaryAssetId: uploadResult.publicId,
           userId: settings.userId,
         }),
       });
@@ -390,7 +387,7 @@ export default function HomeScreen() {
               <View style={styles.stepRow}>
                 <View style={[styles.stepDot, getStepIndicatorStyle('uploading')]} />
                 <Text style={[styles.stepLabel, status === 'uploading' && styles.activeLabel]}>
-                  Uploading to Drive ({Math.round(uploadProgress * 100)}%)
+                  Uploading to Cloud ({Math.round(uploadProgress * 100)}%)
                 </Text>
               </View>
               <View style={styles.stepConnector} />
