@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import ytdl from "@distube/ytdl-core";
 
 const COBALT_ENDPOINTS = [
   'https://cobalt.api.ryuk.cx',
@@ -37,12 +38,47 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // --- STEP 1: Attempt native resolution with YTDL-Core (if YOUTUBE_COOKIE is set) ---
+    if (process.env.YOUTUBE_COOKIE) {
+      try {
+        console.log("Attempting resolution via @distube/ytdl-core with cookie credentials...");
+        let cookies;
+        if (process.env.YOUTUBE_COOKIE.trim().startsWith("[")) {
+          cookies = JSON.parse(process.env.YOUTUBE_COOKIE);
+        } else {
+          cookies = process.env.YOUTUBE_COOKIE.split(";").map(c => {
+            const [name, ...val] = c.split("=");
+            if (!name) return null;
+            return {
+              name: name.trim(),
+              value: val.join("=").trim(),
+              domain: ".youtube.com",
+              path: "/"
+            };
+          }).filter(Boolean);
+        }
+        
+        const agent = ytdl.createAgent(cookies);
+        const info = await ytdl.getInfo(youtubeUrl, { agent });
+        const format = ytdl.chooseFormat(info.formats, {
+          quality: "highest",
+          filter: (f) => f.container === "mp4" && f.hasVideo && f.hasAudio,
+        });
+
+        if (format && format.url) {
+          console.log(`Resolution successful via local ytdl-core agent!`);
+          return NextResponse.json({ success: true, url: format.url });
+        }
+      } catch (ytdlErr) {
+        const ytdlErrMsg = ytdlErr instanceof Error ? ytdlErr.message : String(ytdlErr);
+        console.warn("Local ytdl-core resolution failed:", ytdlErrMsg);
+      }
+    }
+
+    // --- STEP 2: Fallback to Parallel Cobalt instances ---
     console.log(`Server attempting parallel resolution via Cobalt for: ${youtubeUrl}`);
-    
-    // Create parallel promises for each endpoint
     const promises = COBALT_ENDPOINTS.map(async (endpoint) => {
       try {
-        console.log(`Server probing endpoint in parallel: ${endpoint}`);
         const res = await fetchWithTimeout(
           endpoint,
           {
@@ -56,13 +92,13 @@ export async function POST(req: NextRequest) {
               videoQuality: '720',
             }),
           },
-          8000 // 8 seconds timeout per request
+          8000 // 8s timeout
         );
 
         if (res.ok) {
           const data = await res.json();
           if (data && data.url) {
-            console.log(`Successfully resolved stream URL from parallel endpoint: ${endpoint}`);
+            console.log(`Successfully resolved stream URL from endpoint: ${endpoint}`);
             return data.url;
           }
         }
@@ -75,7 +111,6 @@ export async function POST(req: NextRequest) {
     });
 
     try {
-      // Promise.any returns the first successfully resolved promise
       const resolvedUrl = await Promise.any(promises);
       return NextResponse.json({ success: true, url: resolvedUrl });
     } catch (anyErr) {
@@ -83,7 +118,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { 
           error: "resolution_failed", 
-          message: "All public resolution nodes failed. Please try again or check your URL." 
+          message: "All resolution methods failed. In production, configure YOUTUBE_COOKIE in Vercel to bypass bot restrictions." 
         },
         { status: 500 }
       );
