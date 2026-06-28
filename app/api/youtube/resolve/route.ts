@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import ytdl from "@distube/ytdl-core";
+
+const COBALT_ENDPOINTS = [
+  'https://cobalt.api.ryuk.cx',
+  'https://api.c1.syntalix.de',
+  'https://cobalt.syntalix.de',
+  'https://cobalt.swm.me',
+];
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,46 +19,59 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log(`Server attempting local resolution for: ${youtubeUrl}`);
+    console.log(`Server attempting resolution via Cobalt for: ${youtubeUrl}`);
     
-    // Get video info
-    const info = await ytdl.getInfo(youtubeUrl);
-    
-    // Choose format with both audio and video, prioritizing mp4
-    const format = ytdl.chooseFormat(info.formats, {
-      quality: "highest",
-      filter: (f) => f.container === "mp4" && f.hasVideo && f.hasAudio,
-    });
+    let resolvedUrl = null;
+    let lastError: Error | null = null;
 
-    if (format && format.url) {
-      console.log(`Resolution successful! Found direct link: ${format.qualityLabel}`);
-      return NextResponse.json({ success: true, url: format.url });
+    for (const endpoint of COBALT_ENDPOINTS) {
+      try {
+        console.log(`Server attempting resolution via: ${endpoint}`);
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            url: youtubeUrl,
+            videoQuality: '720',
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.url) {
+            resolvedUrl = data.url;
+            console.log(`Successfully resolved stream URL from endpoint: ${endpoint}`);
+            break;
+          }
+        } else {
+          const text = await res.text();
+          console.warn(`Server Cobalt call returned status ${res.status}: ${text}`);
+          throw new Error(`Instance returned status ${res.status}: ${text}`);
+        }
+      } catch (err) {
+        lastError = err as Error;
+        console.warn(`Server Cobalt call failed for ${endpoint}:`, lastError.message);
+      }
     }
 
-    // Fallback: try any format that has both video and audio
-    const fallbackFormat = ytdl.chooseFormat(info.formats, {
-      quality: "highest",
-      filter: "audioandvideo",
-    });
-
-    if (fallbackFormat && fallbackFormat.url) {
-      console.log(`Resolution successful via fallback format!`);
-      return NextResponse.json({ success: true, url: fallbackFormat.url });
+    if (resolvedUrl) {
+      return NextResponse.json({ success: true, url: resolvedUrl });
     }
 
     return NextResponse.json(
       { 
-        error: "no_format_found", 
-        message: "Could not find a suitable video format with both video and audio." 
+        error: "resolution_failed", 
+        message: lastError ? lastError.message : "Failed to resolve YouTube video." 
       },
       { status: 500 }
     );
-
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
-    console.error("Local resolution error:", error);
     return NextResponse.json(
-      { error: "resolution_failed", message: errorMessage },
+      { error: "server_error", message: errorMessage },
       { status: 500 }
     );
   }
