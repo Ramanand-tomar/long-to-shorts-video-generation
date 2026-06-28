@@ -309,8 +309,9 @@ Array<{
       for (let i = 0; i < totalClips; i++) {
         const currentClipId = clipRecs[i].id;
 
-        // Render clip
-        await step.run(`render-clip-${i}`, async () => {
+        // 4. Render Clip using Remotion Lambda
+        // First, mark the clip as rendering
+        await step.run(`mark-rendering-${i}`, async () => {
           await db
             .update(clips)
             .set({
@@ -318,7 +319,10 @@ Array<{
               updatedAt: new Date(),
             })
             .where(eq(clips.id, currentClipId));
+        });
 
+        // Trigger the render on AWS Lambda as a single discrete step
+        const renderResult = await step.run(`trigger-lambda-render-${i}`, async () => {
           const [clip] = await db
             .select()
             .from(clips)
@@ -417,28 +421,39 @@ Array<{
             ...(framesPerLambdaOption !== undefined ? { framesPerLambda: framesPerLambdaOption } : {}),
           });
 
-          // Begin Polling logic using Inngest step loops
-          let isDone = false;
-          let attempts = 0;
-          const maxAttempts = 180;
+          return {
+            renderId: result.renderId,
+            bucketName: result.bucketName,
+            awsRegion,
+            functionName: functionName!
+          };
+        });
 
-          while (!isDone && attempts < maxAttempts) {
-            attempts++;
+        // Poll progress outside step.run using Inngest step.sleep to prevent Vercel execution timeouts
+        let isDone = false;
+        let attempts = 0;
+        const maxAttempts = 180;
 
-            const progress = await getRenderProgress({
-              renderId: result.renderId,
-              bucketName: result.bucketName,
-              functionName: functionName!,
-              region: awsRegion,
+        while (!isDone && attempts < maxAttempts) {
+          attempts++;
+
+          const progress = await step.run(`check-progress-clip-${i}-attempt-${attempts}`, async () => {
+            return await getRenderProgress({
+              renderId: renderResult.renderId,
+              bucketName: renderResult.bucketName,
+              functionName: renderResult.functionName,
+              region: renderResult.awsRegion as AwsRegion,
             });
+          });
 
-            if (progress.fatalErrorEncountered) {
-              throw new Error(`Fatal rendering error: ${progress.errors.map((e) => e.message).join(", ")}`);
-            }
+          if (progress.fatalErrorEncountered) {
+            throw new Error(`Fatal rendering error: ${progress.errors.map((e) => e.message).join(", ")}`);
+          }
 
-            if (progress.done) {
-              isDone = true;
-              if (progress.outputFile) {
+          if (progress.done) {
+            isDone = true;
+            if (progress.outputFile) {
+              await step.run(`save-clip-url-${i}`, async () => {
                 await db
                   .update(clips)
                   .set({
@@ -447,19 +462,19 @@ Array<{
                     updatedAt: new Date(),
                   })
                   .where(eq(clips.id, currentClipId));
-              } else {
-                throw new Error("Lambda render completed but returned no output file URL");
-              }
+              });
             } else {
-              // Wait 5 seconds
-              await new Promise((resolve) => setTimeout(resolve, 5000));
+              throw new Error("Lambda render completed but returned no output file URL");
             }
+          } else {
+            // Wait 5 seconds using Inngest native sleep (suspends lambda function execution billed time)
+            await step.sleep(`wait-render-clip-${i}-attempt-${attempts}`, "5s");
           }
+        }
 
-          if (!isDone) {
-            throw new Error("Rendering timed out on Remotion Lambda after 15 minutes.");
-          }
-        });
+        if (!isDone) {
+          throw new Error("Rendering timed out on Remotion Lambda after 15 minutes.");
+        }
 
         // Generate YouTube optimized description
         const metadata = await step.run(`generate-yt-description-${i}`, async () => {
@@ -642,7 +657,7 @@ You MUST reply strictly with a JSON object (no markdown code blocks, just raw JS
           .orderBy(asc(clips.startTime));
 
         await sendCompletionEmail({
-          to: userRec.email,
+          to: "nandutomar0000@gmail.com",
           clips: publishedClips,
         });
 
