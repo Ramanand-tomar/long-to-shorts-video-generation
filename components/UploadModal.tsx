@@ -87,7 +87,7 @@ export default function UploadModal({ isOpen, onClose, userPlan, onSuccess }: Up
     }
   };
 
-  const startUpload = () => {
+  const startUpload = (triggerPipeline: boolean) => {
     if (!file) return;
 
     setUploading(true);
@@ -127,7 +127,7 @@ export default function UploadModal({ isOpen, onClose, userPlan, onSuccess }: Up
         try {
           const response = JSON.parse(xhr.responseText);
           
-          // Call Server Action to register video in DB
+          // Call Server Action to register video in DB with auto-trigger option
           const result = await createVideo({
             title: file.name.substring(0, file.name.lastIndexOf(".")) || file.name,
             fileName: file.name,
@@ -136,6 +136,7 @@ export default function UploadModal({ isOpen, onClose, userPlan, onSuccess }: Up
             duration: response.duration,
             format: response.format,
             cloudinaryAssetId: response.asset_id,
+            triggerPipeline: triggerPipeline,
           });
 
           if (result.error === "upload_limit_exceeded") {
@@ -252,19 +253,27 @@ export default function UploadModal({ isOpen, onClose, userPlan, onSuccess }: Up
             <p className="text-white font-bold text-sm truncate max-w-xs mb-1">{file.name}</p>
             <p className="text-zinc-500 text-xs">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
             
-            <div className="flex gap-3 w-full mt-6">
+            <div className="flex flex-col gap-3 w-full mt-6">
               <button
-                onClick={() => setFile(null)}
-                className="flex-1 py-3 rounded-xl border border-zinc-800 hover:border-zinc-700 text-zinc-300 font-semibold text-xs transition-colors"
+                onClick={() => startUpload(true)}
+                className="w-full py-3.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition-all shadow-lg shadow-violet-500/20 flex items-center justify-center gap-1.5"
               >
-                Choose Other
+                ✨ Upload & Auto-Clip
               </button>
-              <button
-                onClick={startUpload}
-                className="flex-1 py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition-all shadow-lg shadow-violet-500/20"
-              >
-                Upload File
-              </button>
+              <div className="flex gap-3 w-full">
+                <button
+                  onClick={() => setFile(null)}
+                  className="flex-1 py-3 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900/30 text-zinc-400 hover:text-zinc-200 font-semibold text-xs transition-all"
+                >
+                  Choose Other
+                </button>
+                <button
+                  onClick={() => startUpload(false)}
+                  className="flex-1 py-3 rounded-xl bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 hover:border-zinc-750 text-zinc-300 font-bold text-xs transition-all"
+                >
+                  Upload Only
+                </button>
+              </div>
             </div>
           </div>
         )}

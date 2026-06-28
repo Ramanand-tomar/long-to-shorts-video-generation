@@ -1,7 +1,8 @@
 "use server";
 
 import { db } from "@/lib/db";
-import { videos, users, usageLogs } from "@/lib/db/schema";
+import { videos, users, usageLogs, pipelineRuns } from "@/lib/db/schema";
+import { inngest } from "@/lib/inngest/client";
 import { getCurrentUser } from "@/lib/db/user";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -15,6 +16,7 @@ interface CreateVideoPayload {
   duration?: number;
   format?: string;
   cloudinaryAssetId?: string;
+  triggerPipeline?: boolean;
 }
 
 /**
@@ -45,6 +47,8 @@ export async function createVideo(payload: CreateVideoPayload) {
       return { error: "upload_limit_exceeded" };
     }
 
+    const shouldTrigger = payload.triggerPipeline !== false;
+
     // 3. Save the video to the database
     const [newVideo] = await db
       .insert(videos)
@@ -57,9 +61,30 @@ export async function createVideo(payload: CreateVideoPayload) {
         duration: payload.duration || 0,
         format: payload.format || null,
         cloudinaryAssetId: payload.cloudinaryAssetId || null,
-        status: "ready",
+        status: shouldTrigger ? "pending" : "ready",
       })
       .returning();
+
+    // Trigger pipeline if requested
+    if (shouldTrigger) {
+      const [newRun] = await db
+        .insert(pipelineRuns)
+        .values({
+          videoId: newVideo.id,
+          userId: user.id,
+          status: "pending",
+        })
+        .returning();
+
+      await inngest.send({
+        name: "vidshort/auto-pipeline.start",
+        data: {
+          videoId: newVideo.id,
+          userId: user.id,
+          pipelineRunId: newRun.id,
+        },
+      });
+    }
 
     // 4. Increment the user's upload counter and update the timestamp
     await db
