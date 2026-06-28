@@ -94,7 +94,9 @@ export async function uploadToGoogleDrive(
 
   if (!permissionResponse.ok) {
     const errorText = await permissionResponse.text();
-    console.warn('Permission update failed (non-blocking for trigger):', errorText);
+    throw new Error(
+      `Failed to make Google Drive file public: ${errorText}. Please make sure your Google account allows sharing files outside your organization with 'anyone with the link'.`
+    );
   }
 
   return {
