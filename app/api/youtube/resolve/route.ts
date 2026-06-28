@@ -5,7 +5,25 @@ const COBALT_ENDPOINTS = [
   'https://api.c1.syntalix.de',
   'https://cobalt.syntalix.de',
   'https://cobalt.swm.me',
+  'https://cobalt.unseen.is',
+  'https://cobalt.qrl.nz',
 ];
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,55 +37,58 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log(`Server attempting resolution via Cobalt for: ${youtubeUrl}`);
+    console.log(`Server attempting parallel resolution via Cobalt for: ${youtubeUrl}`);
     
-    let resolvedUrl = null;
-    let lastError: Error | null = null;
-
-    for (const endpoint of COBALT_ENDPOINTS) {
+    // Create parallel promises for each endpoint
+    const promises = COBALT_ENDPOINTS.map(async (endpoint) => {
       try {
-        console.log(`Server attempting resolution via: ${endpoint}`);
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
+        console.log(`Server probing endpoint in parallel: ${endpoint}`);
+        const res = await fetchWithTimeout(
+          endpoint,
+          {
+            method: 'POST',
+            headers: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              url: youtubeUrl,
+              videoQuality: '720',
+            }),
           },
-          body: JSON.stringify({
-            url: youtubeUrl,
-            videoQuality: '720',
-          }),
-        });
+          8000 // 8 seconds timeout per request
+        );
 
         if (res.ok) {
           const data = await res.json();
           if (data && data.url) {
-            resolvedUrl = data.url;
-            console.log(`Successfully resolved stream URL from endpoint: ${endpoint}`);
-            break;
+            console.log(`Successfully resolved stream URL from parallel endpoint: ${endpoint}`);
+            return data.url;
           }
-        } else {
-          const text = await res.text();
-          console.warn(`Server Cobalt call returned status ${res.status}: ${text}`);
-          throw new Error(`Instance returned status ${res.status}: ${text}`);
         }
+        throw new Error(`Endpoint returned status ${res.status}`);
       } catch (err) {
-        lastError = err as Error;
-        console.warn(`Server Cobalt call failed for ${endpoint}:`, lastError.message);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`Parallel probe failed for ${endpoint}:`, errMsg);
+        throw err;
       }
-    }
+    });
 
-    if (resolvedUrl) {
+    try {
+      // Promise.any returns the first successfully resolved promise
+      const resolvedUrl = await Promise.any(promises);
       return NextResponse.json({ success: true, url: resolvedUrl });
+    } catch (anyErr) {
+      console.error("All parallel Cobalt resolution promises failed:", anyErr);
+      return NextResponse.json(
+        { 
+          error: "resolution_failed", 
+          message: "All public resolution nodes failed. Please try again or check your URL." 
+        },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json(
-      { 
-        error: "resolution_failed", 
-        message: lastError ? lastError.message : "Failed to resolve YouTube video." 
-      },
-      { status: 500 }
-    );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
     return NextResponse.json(
