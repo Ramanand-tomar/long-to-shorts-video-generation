@@ -8,7 +8,32 @@ export interface UploadResult {
 export interface UploadProgressCallback {
   (progress: number): void;
 }
+export async function refreshAccessToken(
+  refreshToken: string,
+  clientId: string,
+  clientSecret: string
+): Promise<string> {
+  console.log('Refreshing Google Drive Access Token using Refresh Token...');
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: `client_id=${clientId}&client_secret=${clientSecret}&refresh_token=${refreshToken}&grant_type=refresh_token`,
+  });
 
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to refresh Google access token: ${errorText}`);
+  }
+
+  const data = await response.json();
+  if (data && data.access_token) {
+    return data.access_token;
+  }
+
+  throw new Error('Refresh token request succeeded but did not return access_token.');
+}
 export async function uploadToGoogleDrive(
   fileUri: string,
   accessToken: string,

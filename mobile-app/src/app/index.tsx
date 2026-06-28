@@ -15,7 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ThemedView } from '@/components/themed-view';
 import { getSettings } from '@/utils/storage';
 import { getYouTubeDirectUrl, downloadVideo } from '@/utils/downloader';
-import { uploadToGoogleDrive } from '@/utils/gdrive';
+import { uploadToGoogleDrive, refreshAccessToken } from '@/utils/gdrive';
 import { Play, Download, CloudUpload, Sparkles, Settings, FileVideo, Upload } from 'lucide-react-native';
 
 type StepStatus = 'idle' | 'resolving' | 'downloading' | 'uploading' | 'triggering' | 'completed' | 'failed';
@@ -105,16 +105,29 @@ export default function HomeScreen() {
     try {
       // 1. Fetch connection settings
       const settings = await getSettings();
-      if (!settings.serverUrl || !settings.userId || !settings.gdriveToken) {
+      if (!settings.serverUrl || !settings.userId || (!settings.gdriveToken && !settings.gdriveRefreshToken)) {
         Alert.alert(
           'Missing Settings',
-          'Please configure your Server URL, User ID, and Google Drive Access Token in Settings first.',
+          'Please configure your Server URL, User ID, and either Google Drive Access Token or Refresh Token in Settings first.',
           [
             { text: 'Go to Settings', onPress: () => router.push('/settings') },
             { text: 'Cancel', style: 'cancel' }
           ]
         );
         return;
+      }
+
+      let activeAccessToken = settings.gdriveToken;
+      if (settings.gdriveRefreshToken) {
+        if (!settings.gdriveClientId || !settings.gdriveClientSecret) {
+          throw new Error('Google Drive Client ID and Client Secret must be configured in Settings to use a Refresh Token.');
+        }
+        setStatus('resolving');
+        activeAccessToken = await refreshAccessToken(
+          settings.gdriveRefreshToken,
+          settings.gdriveClientId,
+          settings.gdriveClientSecret
+        );
       }
 
       const timestamp = new Date().getTime();
@@ -143,7 +156,7 @@ export default function HomeScreen() {
       setStatus('uploading');
       const uploadResult = await uploadToGoogleDrive(
         localVideoUri,
-        settings.gdriveToken,
+        activeAccessToken,
         fileName,
         settings.gdriveFolderId,
         (progress) => {

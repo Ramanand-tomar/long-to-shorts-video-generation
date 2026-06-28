@@ -6,6 +6,9 @@ export interface AppSettings {
   gdriveToken: string;
   gdriveFolderId: string;
   cobaltUrl: string;
+  gdriveRefreshToken: string;
+  gdriveClientId: string;
+  gdriveClientSecret: string;
 }
 
 const SETTINGS_KEY = '@youtube_pipeline_settings';
@@ -24,9 +27,18 @@ export async function getSettings(): Promise<AppSettings> {
     const raw = await AsyncStorage.getItem(SETTINGS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      // Ensure cobaltUrl is returned even if not saved previously
+      // Ensure default values are returned even if not saved previously
       if (!parsed.cobaltUrl) {
         parsed.cobaltUrl = 'https://api.cobalt.tools';
+      }
+      if (!parsed.gdriveRefreshToken) {
+        parsed.gdriveRefreshToken = '';
+      }
+      if (!parsed.gdriveClientId) {
+        parsed.gdriveClientId = '';
+      }
+      if (!parsed.gdriveClientSecret) {
+        parsed.gdriveClientSecret = '';
       }
       return parsed;
     }
@@ -41,5 +53,8 @@ export async function getSettings(): Promise<AppSettings> {
     gdriveToken: '',
     gdriveFolderId: '',
     cobaltUrl: 'https://api.cobalt.tools',
+    gdriveRefreshToken: '',
+    gdriveClientId: '',
+    gdriveClientSecret: '',
   };
 }

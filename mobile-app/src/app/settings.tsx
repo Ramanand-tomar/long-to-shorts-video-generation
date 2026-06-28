@@ -21,6 +21,9 @@ export default function SettingsScreen() {
   const [gdriveToken, setGdriveToken] = useState('');
   const [gdriveFolderId, setGdriveFolderId] = useState('');
   const [cobaltUrl, setCobaltUrl] = useState('');
+  const [gdriveRefreshToken, setGdriveRefreshToken] = useState('');
+  const [gdriveClientId, setGdriveClientId] = useState('');
+  const [gdriveClientSecret, setGdriveClientSecret] = useState('');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -34,6 +37,9 @@ export default function SettingsScreen() {
       setGdriveToken(data.gdriveToken);
       setGdriveFolderId(data.gdriveFolderId);
       setCobaltUrl(data.cobaltUrl);
+      setGdriveRefreshToken(data.gdriveRefreshToken);
+      setGdriveClientId(data.gdriveClientId);
+      setGdriveClientSecret(data.gdriveClientSecret);
       setLoading(false);
     }
     load();
@@ -50,6 +56,9 @@ export default function SettingsScreen() {
         gdriveToken: gdriveToken.trim(),
         gdriveFolderId: gdriveFolderId.trim(),
         cobaltUrl: cobaltUrl.trim(),
+        gdriveRefreshToken: gdriveRefreshToken.trim(),
+        gdriveClientId: gdriveClientId.trim(),
+        gdriveClientSecret: gdriveClientSecret.trim(),
       });
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
@@ -123,11 +132,11 @@ export default function SettingsScreen() {
             />
           </View>
 
-          {/* Google Drive Token Input */}
+           {/* Google Drive Token Input */}
           <View style={styles.inputGroup}>
             <View style={styles.labelRow}>
               <Shield size={14} color="#a1a1aa" style={styles.labelIcon} />
-              <Text style={styles.label}>Google Drive Access Token</Text>
+              <Text style={styles.label}>Google Drive Access Token (1 hour limit)</Text>
             </View>
             <TextInput
               style={[styles.input, styles.textArea]}
@@ -141,8 +150,65 @@ export default function SettingsScreen() {
               autoCorrect={false}
             />
             <Text style={styles.helperText}>
-              Ensure the token has "https://www.googleapis.com/auth/drive" scope.
+              Used as fallback if no Refresh Token is provided below.
             </Text>
+          </View>
+
+          {/* Google Drive Refresh Token Input */}
+          <View style={styles.inputGroup}>
+            <View style={styles.labelRow}>
+              <Shield size={14} color="#a1a1aa" style={styles.labelIcon} />
+              <Text style={styles.label}>Google Drive Refresh Token (Indefinite)</Text>
+            </View>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              placeholder="Paste Google Drive OAuth Refresh Token for auto-renewals"
+              placeholderTextColor="#52525b"
+              value={gdriveRefreshToken}
+              onChangeText={setGdriveRefreshToken}
+              multiline
+              numberOfLines={3}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Text style={styles.helperText}>
+              Recommended. The app will automatically generate fresh access tokens on every upload using your client credentials!
+            </Text>
+          </View>
+
+          {/* Google OAuth Client ID Input */}
+          <View style={styles.inputGroup}>
+            <View style={styles.labelRow}>
+              <Shield size={14} color="#a1a1aa" style={styles.labelIcon} />
+              <Text style={styles.label}>Google Client ID (Offline Use)</Text>
+            </View>
+            <TextInput
+              style={styles.input}
+              placeholder="Paste Google OAuth Client ID"
+              placeholderTextColor="#52525b"
+              value={gdriveClientId}
+              onChangeText={setGdriveClientId}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+
+          {/* Google OAuth Client Secret Input */}
+          <View style={styles.inputGroup}>
+            <View style={styles.labelRow}>
+              <Shield size={14} color="#a1a1aa" style={styles.labelIcon} />
+              <Text style={styles.label}>Google Client Secret (Offline Use)</Text>
+            </View>
+            <TextInput
+              style={styles.input}
+              placeholder="Paste Google OAuth Client Secret"
+              placeholderTextColor="#52525b"
+              value={gdriveClientSecret}
+              onChangeText={setGdriveClientSecret}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
           </View>
 
           {/* Google Folder ID Input */}
