@@ -19,7 +19,7 @@ export async function refreshAccessToken(
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
     },
-    body: `client_id=${clientId}&client_secret=${clientSecret}&refresh_token=${refreshToken}&grant_type=refresh_token`,
+    body: `client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}&refresh_token=${encodeURIComponent(refreshToken)}&grant_type=refresh_token`,
   });
 
   if (!response.ok) {
