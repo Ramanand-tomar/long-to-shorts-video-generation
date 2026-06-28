@@ -164,7 +164,8 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
             endAt={endFrame}
             playbackRate={speed}
             style={{
-              width: "100%",
+              width: "108%",
+              left: "-4%",
               height: "auto",
               position: "absolute",
               top: "50%",
@@ -187,7 +188,8 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
             endAt={endFrame}
             playbackRate={speed}
             style={{
-              width: "100%",
+              width: "108%",
+              left: "-4%",
               height: "auto",
               position: "absolute",
               top: "50%",
@@ -234,7 +236,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
             textAlign: "center",
             color: layout === "fit_white" ? "#000000" : "#ffffff",
             fontFamily: `'${fontFamilyName}', sans-serif`,
-            fontSize: `${Math.max(22, Math.round(styleConfig.fontSize * 0.7))}px`,
+            fontSize: `${Math.max(36, Math.round(styleConfig.fontSize * 0.95))}px`,
             fontWeight: 900,
             lineHeight: 1.3,
             zIndex: 20,

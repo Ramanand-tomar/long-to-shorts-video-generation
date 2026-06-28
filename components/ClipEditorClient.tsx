@@ -65,7 +65,7 @@ interface ClipEditorClientProps {
 
 const DEFAULT_STYLE_CONFIG: StyleConfig = {
   fontFamily: "Inter",
-  fontSize: 54,
+  fontSize: 80,
   captionColor: "#ffffff",
   highlightColor: "#fbbf24",
   textPosition: "bottom",
@@ -361,7 +361,7 @@ export default function ClipEditorClient({
         <div className="lg:col-span-2 flex flex-col items-center space-y-6">
           
           {/* Player viewport: vertical mobile-style screen wrapper */}
-          <div className="w-[270px] aspect-[9/16] rounded-3xl border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden relative max-h-[480px]">
+          <div className="w-[320px] aspect-[9/16] rounded-3xl border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden relative max-h-[570px]">
             <Player
               component={ClipComposition}
               durationInFrames={durationInFrames}

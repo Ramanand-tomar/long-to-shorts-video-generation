@@ -116,7 +116,7 @@ export const renderClip = inngest.createFunction(
 
       const styleConfig = (clip.subtitleStyle as StyleConfig) || {
         fontFamily: "Inter",
-        fontSize: 20,
+        fontSize: 80,
         captionColor: "#ffffff",
         highlightColor: "#fbbf24",
         textPosition: "bottom",

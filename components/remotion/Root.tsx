@@ -27,7 +27,7 @@ export const Root: React.FC = () => {
           transcriptSegments: [],
           styleConfig: {
             fontFamily: "Inter",
-            fontSize: 40,
+            fontSize: 80,
             captionColor: "#ffffff",
             highlightColor: "#fbbf24",
             textPosition: "bottom" as const,
