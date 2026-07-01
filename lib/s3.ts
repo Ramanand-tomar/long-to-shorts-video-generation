@@ -12,6 +12,7 @@ const s3Client = accessKeyId && secretAccessKey
         accessKeyId,
         secretAccessKey,
       },
+      requestStreamBufferSize: 65536,
     })
   : null;
 
