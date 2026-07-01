@@ -91,9 +91,19 @@ export default function ClipEditorClient({
   // Load existing style or use defaults
   const [styleConfig, setStyleConfig] = useState<StyleConfig>(() => {
     if (clip.subtitleStyle) {
-      return clip.subtitleStyle as StyleConfig;
+      const saved = clip.subtitleStyle as StyleConfig;
+      if (saved.layoutTitleText === undefined || saved.layoutTitleText === "wait for end") {
+        return {
+          ...saved,
+          layoutTitleText: clip.title,
+        };
+      }
+      return saved;
     }
-    return DEFAULT_STYLE_CONFIG;
+    return {
+      ...DEFAULT_STYLE_CONFIG,
+      layoutTitleText: clip.title,
+    };
   });
 
   // Action states
@@ -640,6 +650,22 @@ export default function ClipEditorClient({
                   placeholder="Even ChatGPT is jealous of him..."
                   className="w-full bg-zinc-950 border border-zinc-900 text-zinc-300 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-violet-500"
                 />
+                <div className="flex gap-2 mt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setStyleConfig({ ...styleConfig, layoutTitleText: clip.title })}
+                    className="text-[10px] bg-zinc-950 hover:bg-zinc-900 text-zinc-400 hover:text-white px-2 py-1 rounded border border-zinc-900 transition-colors cursor-pointer font-medium"
+                  >
+                    Use Clip Title
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStyleConfig({ ...styleConfig, layoutTitleText: video.title })}
+                    className="text-[10px] bg-zinc-950 hover:bg-zinc-900 text-zinc-400 hover:text-white px-2 py-1 rounded border border-zinc-900 transition-colors cursor-pointer font-medium"
+                  >
+                    Use Video Title
+                  </button>
+                </div>
               </div>
             ) : null}
 

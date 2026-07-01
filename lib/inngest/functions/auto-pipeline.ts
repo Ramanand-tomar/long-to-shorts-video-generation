@@ -365,7 +365,7 @@ Array<{
                 backgroundStyle: "box",
                 emphasisAnimation: "pop",
                 layoutType: "fit_black",
-                layoutTitleText: "wait for end",
+                layoutTitleText: c.title,
                 isMirrored: false,
                 playbackSpeed: 1.02,
               },
@@ -469,19 +469,27 @@ Array<{
               (w) => w.start >= clip.startTime && w.start <= clip.endTime
             );
 
-            const styleConfig = (clip.subtitleStyle as StyleConfig | null) || {
-              fontFamily: "Inter",
-              fontSize: 80,
-              captionColor: "#ffffff",
-              highlightColor: "#fbbf24",
-              textPosition: "bottom",
-              backgroundStyle: "box",
-              emphasisAnimation: "pop",
-              layoutType: "fit_black",
-              layoutTitleText: "wait for end",
-              isMirrored: false,
-              playbackSpeed: 1.02,
-            };
+            let styleConfig = (clip.subtitleStyle as StyleConfig | null);
+            if (!styleConfig) {
+              styleConfig = {
+                fontFamily: "Inter",
+                fontSize: 80,
+                captionColor: "#ffffff",
+                highlightColor: "#fbbf24",
+                textPosition: "bottom",
+                backgroundStyle: "box",
+                emphasisAnimation: "pop",
+                layoutType: "fit_black",
+                layoutTitleText: clip.title,
+                isMirrored: false,
+                playbackSpeed: 1.02,
+              };
+            } else if (styleConfig.layoutTitleText === undefined || styleConfig.layoutTitleText === "wait for end") {
+              styleConfig = {
+                ...styleConfig,
+                layoutTitleText: clip.title,
+              };
+            }
 
             const speed = styleConfig.playbackSpeed || 1.0;
             const inputProps = {
