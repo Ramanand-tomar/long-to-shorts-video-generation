@@ -1,8 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useTransition, useState } from "react";
 import Link from "next/link";
-import { Scissors, Play, Clock, Sparkles, Download, ExternalLink } from "lucide-react";
+import { Scissors, Play, Clock, Sparkles, Download, ExternalLink, Trash2, Loader2 } from "lucide-react";
+import { deleteClip } from "@/actions/video";
 
 interface Clip {
   id: string;
@@ -23,6 +24,23 @@ interface ClipsListProps {
 }
 
 export default function ClipsList({ clips }: ClipsListProps) {
+  const [isPending, startTransition] = useTransition();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDelete = (clipId: string) => {
+    if (!confirm("Are you sure you want to delete this clip? This will delete the clip from the database and free up S3/rendered storage space.")) {
+      return;
+    }
+    setDeletingId(clipId);
+    startTransition(async () => {
+      const res = await deleteClip(clipId);
+      setDeletingId(null);
+      if (res.error) {
+        alert(`Failed to delete clip: ${res.error}`);
+      }
+    });
+  };
+
   // Helper to format duration in MM:SS
   const formatDuration = (start: number, end: number) => {
     const duration = Math.max(0, end - start);
@@ -149,6 +167,19 @@ export default function ClipsList({ clips }: ClipsListProps) {
                           <Download className="w-3.5 h-3.5" />
                         </a>
                       )}
+
+                      <button
+                        onClick={() => handleDelete(clip.id)}
+                        disabled={isPending}
+                        className="p-2 rounded-xl bg-zinc-900 border border-zinc-850 hover:border-red-900 hover:bg-red-950/20 text-zinc-400 hover:text-red-400 disabled:opacity-50 transition-colors"
+                        title="Delete Clip and Free Up Space"
+                      >
+                        {isPending && deletingId === clip.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
+                      </button>
                       
                       <Link
                         href={`/dashboard/clips/${clip.id}`}

@@ -1,9 +1,10 @@
 "use server";
 
 import { db } from "@/lib/db";
-import { videos, users, usageLogs, pipelineRuns } from "@/lib/db/schema";
+import { videos, users, usageLogs, pipelineRuns, clips } from "@/lib/db/schema";
 import { inngest } from "@/lib/inngest/client";
 import { getCurrentUser } from "@/lib/db/user";
+import { deleteFileFromS3 } from "@/lib/s3";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { QUOTAS } from "@/lib/quotas";
@@ -152,6 +153,72 @@ export async function deleteVideo(videoId: string) {
     return { success: true };
   } catch (error) {
     console.error("Failed to delete video:", error);
+    return { error: "internal_server_error" };
+  }
+}
+
+/**
+ * Server action to delete a specific clip recommendation and clean up S3 storage if rendered.
+ */
+export async function deleteClip(clipId: string) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return { error: "unauthorized" };
+    }
+
+    // 1. Confirm clip ownership via its associated video
+    const [clip] = await db
+      .select({
+        id: clips.id,
+        videoId: clips.videoId,
+        clipUrl: clips.clipUrl,
+      })
+      .from(clips)
+      .where(eq(clips.id, clipId))
+      .limit(1);
+
+    if (!clip) {
+      return { error: "clip_not_found" };
+    }
+
+    const [video] = await db
+      .select({
+        id: videos.id,
+        userId: videos.userId,
+      })
+      .from(videos)
+      .where(eq(videos.id, clip.videoId))
+      .limit(1);
+
+    if (!video || video.userId !== user.id) {
+      return { error: "unauthorized" };
+    }
+
+    // 2. If there's an S3 URL, clean it up from storage
+    if (clip.clipUrl) {
+      try {
+        if (clip.clipUrl.includes(".amazonaws.com/")) {
+          await deleteFileFromS3(clip.clipUrl);
+        }
+      } catch (storageErr) {
+        console.error(`Failed to delete S3 file for clip ${clipId}:`, storageErr);
+      }
+    }
+
+    // 3. Delete clip from database
+    await db
+      .delete(clips)
+      .where(eq(clips.id, clipId));
+
+    // 4. Revalidate routes to refresh clip list UI
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/clips");
+    revalidatePath(`/dashboard/videos/${clip.videoId}`);
+
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to delete clip:", error);
     return { error: "internal_server_error" };
   }
 }
