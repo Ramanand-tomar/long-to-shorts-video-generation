@@ -281,10 +281,12 @@ export const autoPipeline = inngest.createFunction(
 
       // Save transcript back to database
       await step.run("save-transcript", async () => {
+        const duration = (transcriptData as { metadata?: { duration?: number } })?.metadata?.duration;
         await db
           .update(videos)
           .set({
             transcript: transcriptData,
+            duration: duration ? Math.ceil(duration) : null,
             updatedAt: new Date(),
           })
           .where(eq(videos.id, videoId));
