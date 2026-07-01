@@ -1,9 +1,10 @@
 import { inngest } from "../client";
 import { db } from "@/lib/db";
-import { scheduledPosts, socialConnections, clips, usageLogs } from "@/lib/db/schema";
+import { scheduledPosts, socialConnections, clips, usageLogs, users } from "@/lib/db/schema";
 import { eq, and, lte } from "drizzle-orm";
 import { publishToZernio } from "@/lib/zernio";
 import { decrypt } from "@/lib/encryption";
+import { uploadVideoToYouTube } from "@/lib/youtube";
 
 // Unused interface commented out to resolve ESLint warning
 // interface PublishPostEvent {
@@ -18,8 +19,8 @@ import { decrypt } from "@/lib/encryption";
  * Scans the DB for scheduled posts that are due, and triggers the publishing flow for each.
  */
 export const publishScheduledPosts = inngest.createFunction(
-  { 
-    id: "publish-scheduled-posts", 
+  {
+    id: "publish-scheduled-posts",
     name: "Publish Scheduled Posts Cron",
     triggers: [{ cron: "*/15 * * * *" }]
   },
@@ -69,7 +70,7 @@ export const publishSinglePost = inngest.createFunction(
     name: "Publish Single Post",
     concurrency: 5,
     // Max 3 retries (first attempt + 2 retries = 3 attempts total)
-    retries: 2, 
+    retries: 2,
     triggers: [{ event: "vidshort/post.publish" }]
   },
   async ({ event, step }) => {
@@ -91,6 +92,7 @@ export const publishSinglePost = inngest.createFunction(
           clipTitle: clips.title,
           connectionId: socialConnections.id,
           accessToken: socialConnections.accessToken,
+          refreshToken: socialConnections.refreshToken,
           externalAccountId: socialConnections.externalAccountId,
           platform: socialConnections.platform,
           userId: scheduledPosts.userId,
@@ -188,25 +190,54 @@ export const publishSinglePost = inngest.createFunction(
         });
         return result as { id?: string; status?: string; platforms?: unknown[]; publishedAt?: string };
       } catch (error: unknown) {
+        // Fallback for YouTube
+        if (postDetails.platform === "youtube") {
+          console.warn("Zernio YouTube post publishing failed. Attempting direct upload fallback...", error);
+          try {
+            const [user] = await db
+              .select({ youtubeRefreshToken: users.youtubeRefreshToken })
+              .from(users)
+              .where(eq(users.id, postDetails.userId))
+              .limit(1);
+
+            const directRefreshToken = user?.youtubeRefreshToken || postDetails.refreshToken;
+
+            if (directRefreshToken) {
+              const directId = await uploadVideoToYouTube({
+                s3Url: postDetails.clipUrl,
+                title: postDetails.clipTitle || "YouTube Short",
+                description: postDetails.caption || "",
+                refreshToken: directRefreshToken,
+              });
+              console.log(`Direct YouTube upload fallback succeeded. Video ID: ${directId}`);
+              return { id: directId, status: "published_direct" };
+            } else {
+              console.warn("No direct YouTube refresh token found for fallback.");
+            }
+          } catch (fallbackErr) {
+            console.error("Direct YouTube upload fallback failed:", fallbackErr);
+          }
+        }
+
         // Parse error message / status code
         const err = error as { message?: string };
         const msg = err.message || "";
         const is4xx = msg.includes("status: 4") || msg.includes("(40") || msg.includes("failed (4");
-        
+
         if (is4xx) {
           // 4xx client/revocation error -> Non-retryable error, update status to failed directly
           await db
             .update(scheduledPosts)
-            .set({ 
-              status: "failed", 
+            .set({
+              status: "failed",
               errorMessage: `Client configuration error: ${msg}`,
-              updatedAt: new Date() 
+              updatedAt: new Date()
             })
             .where(eq(scheduledPosts.id, scheduledPostId));
-          
+
           return { status: "failed_4xx", error: msg };
         }
-        
+
         // 5xx or others -> throw so Inngest retries
         throw error;
       }
@@ -249,8 +280,8 @@ export const publishSinglePost = inngest.createFunction(
  * Called when all retries are exhausted.
  */
 export const handlePublishFailure = inngest.createFunction(
-  { 
-    id: "publish-single-post-failed", 
+  {
+    id: "publish-single-post-failed",
     name: "Handle Publish Single Post Failure",
     triggers: [{ event: "inngest/function.failed" }]
   },

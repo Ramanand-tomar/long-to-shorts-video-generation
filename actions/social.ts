@@ -46,13 +46,13 @@ export async function getOAuthConnectUrl(provider: string) {
         appUrl = "http://localhost:3000";
       }
     }
-    
+
     // 3. Generate a secure random state token and store it in an encrypted cookie
     const state = crypto.randomBytes(16).toString("hex");
     const encryptedState = encrypt(state);
 
     const redirectUri = `${appUrl}/api/auth/callback/zernio?provider=${provider}&state=${encodeURIComponent(state)}`;
-    
+
     const cookieStore = await cookies();
     cookieStore.set("oauth_state", encryptedState, {
       httpOnly: true,

@@ -5,7 +5,8 @@ import { eq, asc, and } from "drizzle-orm";
 import { renderMediaOnLambda, getRenderProgress, AwsRegion } from "@remotion/lambda";
 import { publishToZernio } from "@/lib/zernio";
 import { deleteFileFromS3 } from "@/lib/s3";
-import { sendCompletionEmail } from "@/lib/email";
+import { sendCompletionEmail, sendFailureEmail } from "@/lib/email";
+import { uploadVideoToYouTube } from "@/lib/youtube";
 import { StyleConfig } from "@/components/remotion/ClipComposition";
 import { v2 as cloudinary } from 'cloudinary';
 
@@ -563,26 +564,74 @@ You MUST reply strictly with a JSON object (no markdown code blocks, just raw JS
             throw new Error(`User does not have a linked YouTube channel on Zernio. Please link it in Settings.`);
           }
 
-          // Submit post to Zernio API for YouTube
-          const zernioResult = await publishToZernio({
-            title: metadata.youtubeTitle || clip.title,
-            content: metadata.youtubeDescription || clip.description || "",
-            mediaItems: [
-              {
-                type: "video",
-                url: clip.clipUrl,
-              }
-            ],
-            platforms: [
-              {
-                platform: "youtube",
-                accountId: youtubeConn.externalAccountId,
-              }
-            ],
-            publishNow: true,
-          }) as { id?: string } | undefined;
+          let youtubeVideoId: string | null = null;
+          let zernioError: unknown = null;
 
-          const youtubeVideoId = zernioResult?.id || "zernio_published";
+          try {
+            // Submit post to Zernio API for YouTube
+            const zernioResult = await publishToZernio({
+              title: metadata.youtubeTitle || clip.title,
+              content: metadata.youtubeDescription || clip.description || "",
+              mediaItems: [
+                {
+                  type: "video",
+                  url: clip.clipUrl,
+                }
+              ],
+              platforms: [
+                {
+                  platform: "youtube",
+                  accountId: youtubeConn.externalAccountId,
+                }
+              ],
+              publishNow: true,
+            }) as { id?: string } | undefined;
+
+            youtubeVideoId = zernioResult?.id || "zernio_published";
+          } catch (err) {
+            zernioError = err;
+            console.error("Zernio YouTube publish failed. Attempting direct upload fallback...", err);
+          }
+
+          if (!youtubeVideoId) {
+            // Retrieve direct YouTube refresh token for direct upload fallback
+            const [user] = await db
+              .select({ youtubeRefreshToken: users.youtubeRefreshToken })
+              .from(users)
+              .where(eq(users.id, userId))
+              .limit(1);
+
+            const directRefreshToken = user?.youtubeRefreshToken || youtubeConn?.refreshToken;
+
+            if (!directRefreshToken) {
+              throw new Error(
+                `YouTube upload failed. Zernio error: ${
+                  zernioError instanceof Error ? zernioError.message : String(zernioError)
+                }. Direct upload fallback failed: No direct YouTube refresh token found.`
+              );
+            }
+
+            try {
+              const directId = await uploadVideoToYouTube({
+                s3Url: clip.clipUrl,
+                title: metadata.youtubeTitle || clip.title,
+                description: metadata.youtubeDescription || clip.description || "",
+                tags: metadata.youtubeTags || [],
+                refreshToken: directRefreshToken,
+              });
+              youtubeVideoId = directId;
+              console.log(`Direct YouTube upload fallback succeeded. Video ID: ${youtubeVideoId}`);
+            } catch (fallbackErr) {
+              console.error("Direct YouTube upload fallback failed:", fallbackErr);
+              throw new Error(
+                `YouTube upload failed. Zernio error: ${
+                  zernioError instanceof Error ? zernioError.message : String(zernioError)
+                }. Direct upload fallback error: ${
+                  fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
+                }`
+              );
+            }
+          }
 
           await db
             .update(clips)
@@ -756,6 +805,37 @@ You MUST reply strictly with a JSON object (no markdown code blocks, just raw JS
           updatedAt: new Date(),
         })
         .where(eq(videos.id, videoId));
+
+      // Send pipeline failure email notification
+      try {
+        const [userRec] = await db
+          .select({ email: users.email })
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1);
+
+        const userEmail = userRec?.email || "nandutomar0000@gmail.com";
+
+        const [videoRec] = await db
+          .select({ title: videos.title })
+          .from(videos)
+          .where(eq(videos.id, videoId))
+          .limit(1);
+
+        const videoTitle = videoRec?.title || "Unknown Video";
+
+        const recipients = Array.from(new Set([userEmail, "nandutomar0000@gmail.com"]));
+        for (const recipient of recipients) {
+          await sendFailureEmail({
+            to: recipient,
+            videoTitle,
+            error: errMsg,
+            pipelineRunId,
+          });
+        }
+      } catch (emailErr) {
+        console.error("Failed to send failure email notifications:", emailErr);
+      }
 
       throw error;
     }

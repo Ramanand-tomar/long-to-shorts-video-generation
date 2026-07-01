@@ -14,12 +14,41 @@ export async function refreshAccessToken(
   clientSecret: string
 ): Promise<string> {
   console.log('Refreshing Google Drive Access Token using Refresh Token...');
+  
+  // Defensive programming: strip variable name prefixes if the user copied them literally
+  let cleanClientId = clientId.trim();
+  if (cleanClientId.includes('=')) {
+    const parts = cleanClientId.split('=');
+    cleanClientId = parts[parts.length - 1].trim();
+  }
+  
+  let cleanClientSecret = clientSecret.trim();
+  if (cleanClientSecret.includes('=')) {
+    const parts = cleanClientSecret.split('=');
+    cleanClientSecret = parts[parts.length - 1].trim();
+  }
+
+  let cleanRefreshToken = refreshToken.trim();
+  if (cleanRefreshToken.includes('=')) {
+    const parts = cleanRefreshToken.split('=');
+    cleanRefreshToken = parts[parts.length - 1].trim();
+  }
+
+  console.log(`Cleaned Client ID starts with: ${cleanClientId.substring(0, 10)}...`);
+  console.log(`Cleaned Client Secret starts with: ${cleanClientSecret.substring(0, 5)}...`);
+
+  const params = new URLSearchParams();
+  params.append('client_id', cleanClientId);
+  params.append('client_secret', cleanClientSecret);
+  params.append('refresh_token', cleanRefreshToken);
+  params.append('grant_type', 'refresh_token');
+
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
     },
-    body: `client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}&refresh_token=${encodeURIComponent(refreshToken)}&grant_type=refresh_token`,
+    body: params.toString(),
   });
 
   if (!response.ok) {
