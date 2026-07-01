@@ -249,7 +249,10 @@ export const autoPipeline = inngest.createFunction(
                 if (listPermResponse.ok) {
                   const listData = await listPermResponse.json();
                   const permissions = listData.permissions || [];
-                  const anyonePerm = permissions.find((p: any) => p.type === "anyone" && p.role === "reader");
+                  const anyonePerm = permissions.find(
+                    (p: { id?: string; type?: string; role?: string }) =>
+                      p.type === "anyone" && p.role === "reader"
+                  );
 
                   if (anyonePerm && anyonePerm.id) {
                     const delResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions/${anyonePerm.id}`, {
@@ -936,7 +939,10 @@ Reply strictly with a JSON object:
               if (listPermResponse.ok) {
                 const listData = await listPermResponse.json();
                 const permissions = listData.permissions || [];
-                const anyonePerm = permissions.find((p: any) => p.type === "anyone" && p.role === "reader");
+                const anyonePerm = permissions.find(
+                  (p: { id?: string; type?: string; role?: string }) =>
+                    p.type === "anyone" && p.role === "reader"
+                );
 
                 if (anyonePerm && anyonePerm.id) {
                   await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions/${anyonePerm.id}`, {
