@@ -55,6 +55,7 @@ export async function getGoogleDriveConnection() {
       .select({
         id: socialConnections.id,
         profileName: socialConnections.profileName,
+        refreshToken: socialConnections.refreshToken,
       })
       .from(socialConnections)
       .where(
@@ -65,7 +66,22 @@ export async function getGoogleDriveConnection() {
       )
       .limit(1);
 
-    return conn || null;
+    if (!conn) return null;
+
+    let accessToken: string | null = null;
+    if (conn.refreshToken) {
+      try {
+        accessToken = await refreshGoogleDriveAccessToken(conn.refreshToken);
+      } catch (err) {
+        console.error("Failed to refresh access token for Google Drive upload:", err);
+      }
+    }
+
+    return {
+      id: conn.id,
+      profileName: conn.profileName,
+      accessToken,
+    };
   } catch (error) {
     console.error("Failed to get Google Drive connection:", error);
     return null;

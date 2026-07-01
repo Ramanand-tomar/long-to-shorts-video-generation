@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createVideo } from "@/actions/video";
-import { UploadCloud, X, AlertCircle, Loader2 } from "lucide-react";
+import { getGoogleDriveConnection, submitGoogleDriveVideo } from "@/actions/gdrive";
+import { UploadCloud, X, AlertCircle, Loader2, CheckCircle2 } from "lucide-react";
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -22,6 +23,31 @@ export default function UploadModal({ isOpen, onClose, userPlan, onSuccess }: Up
   
   const xhrRef = useRef<XMLHttpRequest | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Google Drive connections hooks for redirecting large uploads
+  const [gdriveConnected, setGdriveConnected] = useState(false);
+  const [gdriveAccessToken, setGdriveAccessToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      checkDriveConnection();
+    }
+  }, [isOpen]);
+
+  const checkDriveConnection = async () => {
+    try {
+      const conn = await getGoogleDriveConnection();
+      if (conn) {
+        setGdriveConnected(true);
+        setGdriveAccessToken(conn.accessToken || null);
+      } else {
+        setGdriveConnected(false);
+        setGdriveAccessToken(null);
+      }
+    } catch (err) {
+      console.error("Failed to check Drive connection:", err);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -87,8 +113,103 @@ export default function UploadModal({ isOpen, onClose, userPlan, onSuccess }: Up
     }
   };
 
+  const uploadToGoogleDrive = async () => {
+    if (!file) return;
+
+    setUploading(true);
+    setProgress(0);
+    setError(null);
+
+    try {
+      const initResponse = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${gdriveAccessToken}`,
+          "Content-Type": "application/json; charset=UTF-8",
+          "X-Upload-Content-Type": file.type,
+          "X-Upload-Content-Length": file.size.toString(),
+        },
+        body: JSON.stringify({
+          name: file.name,
+          mimeType: file.type,
+        }),
+      });
+
+      if (!initResponse.ok) {
+        throw new Error(`Failed to initialize Google Drive upload: ${await initResponse.text()}`);
+      }
+
+      const uploadUrl = initResponse.headers.get("Location");
+      if (!uploadUrl) {
+        throw new Error("No upload Location header returned from Google Drive.");
+      }
+
+      const xhr = new XMLHttpRequest();
+      xhrRef.current = xhr;
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          setProgress(percent);
+        }
+      };
+
+      xhr.onload = async () => {
+        if (xhr.status === 200 || xhr.status === 201) {
+          try {
+            const response = JSON.parse(xhr.responseText);
+            const fileId = response.id;
+            if (!fileId) {
+              throw new Error("Google Drive response did not contain a file ID.");
+            }
+
+            const directUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+            const result = await submitGoogleDriveVideo(directUrl);
+
+            if (result.error) {
+              setError(result.message || `Failed to start pipeline: ${result.error}`);
+              setUploading(false);
+            } else {
+              setUploading(false);
+              if (onSuccess) onSuccess();
+              onClose();
+              router.push(`/dashboard/videos/${result.videoId}`);
+            }
+          } catch {
+            setError("Failed to parse Google Drive response.");
+            setUploading(false);
+          }
+        } else {
+          setError(`Upload failed with status ${xhr.status}.`);
+          setUploading(false);
+        }
+      };
+
+      xhr.onerror = () => {
+        setError("A network error occurred uploading to Google Drive.");
+        setUploading(false);
+      };
+
+      xhr.open("PUT", uploadUrl, true);
+      xhr.send(file);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      setError(errMsg || "Failed uploading to Google Drive.");
+      setUploading(false);
+    }
+  };
+
   const startUpload = (triggerPipeline: boolean) => {
     if (!file) return;
+
+    if (file.size > 100 * 1024 * 1024) {
+      if (!gdriveAccessToken) {
+        setError("This video exceeds 100MB. Direct upload is limited to 100MB. Please connect your Google Drive account below to enable large uploads.");
+        return;
+      }
+      uploadToGoogleDrive();
+      return;
+    }
 
     setUploading(true);
     setProgress(0);
@@ -252,28 +373,73 @@ export default function UploadModal({ isOpen, onClose, userPlan, onSuccess }: Up
             </div>
             <p className="text-white font-bold text-sm truncate max-w-xs mb-1">{file.name}</p>
             <p className="text-zinc-500 text-xs">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
+
+            {file.size > 100 * 1024 * 1024 && (
+              <div className="w-full mt-4">
+                {gdriveConnected ? (
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-center gap-2 text-left">
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                    <span>Video exceeds 100MB. It will be uploaded directly to your connected Google Drive account.</span>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs flex flex-col gap-2.5 items-stretch text-left">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                      <span>Video exceeds 100MB. Direct upload is limited to 100MB.</span>
+                    </div>
+                    <a
+                      href="/api/auth/gdrive/start"
+                      className="px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition-all text-center"
+                    >
+                      Connect Google Drive to Upload
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
             
             <div className="flex flex-col gap-3 w-full mt-6">
-              <button
-                onClick={() => startUpload(true)}
-                className="w-full py-3.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition-all shadow-lg shadow-violet-500/20 flex items-center justify-center gap-1.5"
-              >
-                ✨ Upload & Auto-Clip
-              </button>
-              <div className="flex gap-3 w-full">
-                <button
-                  onClick={() => setFile(null)}
-                  className="flex-1 py-3 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900/30 text-zinc-400 hover:text-zinc-200 font-semibold text-xs transition-all"
-                >
-                  Choose Other
-                </button>
-                <button
-                  onClick={() => startUpload(false)}
-                  className="flex-1 py-3 rounded-xl bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 hover:border-zinc-750 text-zinc-300 font-bold text-xs transition-all"
-                >
-                  Upload Only
-                </button>
-              </div>
+              {file.size <= 100 * 1024 * 1024 ? (
+                <>
+                  <button
+                    onClick={() => startUpload(true)}
+                    className="w-full py-3.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition-all shadow-lg shadow-violet-500/20 flex items-center justify-center gap-1.5"
+                  >
+                    ✨ Upload & Auto-Clip
+                  </button>
+                  <div className="flex gap-3 w-full">
+                    <button
+                      onClick={() => setFile(null)}
+                      className="flex-1 py-3 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900/30 text-zinc-400 hover:text-zinc-200 font-semibold text-xs transition-all"
+                    >
+                      Choose Other
+                    </button>
+                    <button
+                      onClick={() => startUpload(false)}
+                      className="flex-1 py-3 rounded-xl bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 hover:border-zinc-750 text-zinc-300 font-bold text-xs transition-all"
+                    >
+                      Upload Only
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex flex-col gap-3 w-full">
+                  {gdriveConnected && (
+                    <button
+                      onClick={() => startUpload(true)}
+                      className="w-full py-3.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition-all shadow-lg shadow-violet-500/20 flex items-center justify-center gap-1.5"
+                    >
+                      ✨ Upload to Drive & Auto-Clip
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setFile(null)}
+                    className="w-full py-3 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900/30 text-zinc-400 hover:text-zinc-200 font-semibold text-xs transition-all"
+                  >
+                    Choose Other
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -282,7 +448,9 @@ export default function UploadModal({ isOpen, onClose, userPlan, onSuccess }: Up
         {uploading && (
           <div className="p-6 rounded-2xl border border-zinc-800 bg-zinc-950/20 flex flex-col items-center">
             <Loader2 className="w-8 h-8 text-violet-400 animate-spin mb-4" />
-            <p className="text-zinc-300 font-semibold text-sm mb-1">Uploading to Cloudinary...</p>
+            <p className="text-zinc-350 font-semibold text-sm mb-1">
+              {file!.size > 100 * 1024 * 1024 ? "Uploading directly to Google Drive..." : "Uploading to Cloudinary..."}
+            </p>
             <p className="text-zinc-500 text-xs mb-6">Do not close this window</p>
             
             {/* Progress Bar Container */}
