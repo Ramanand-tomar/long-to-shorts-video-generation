@@ -1,4 +1,4 @@
-import { S3Client, DeleteObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, PutObjectCommandInput } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const region = process.env.REMOTION_AWS_REGION || "us-east-1";
@@ -14,6 +14,36 @@ const s3Client = accessKeyId && secretAccessKey
       },
     })
   : null;
+
+export async function uploadStreamToS3(
+  body: PutObjectCommandInput["Body"],
+  key: string,
+  contentType: string,
+  contentLength: number
+): Promise<string> {
+  if (!s3Client) {
+    throw new Error("AWS S3 client is not configured.");
+  }
+
+  const siteUrl = process.env.REMOTION_S3_SITE_NAME || process.env.REMOTION_SERVE_URL || "";
+  const { bucketName } = getS3BucketAndKey(siteUrl);
+
+  if (!bucketName) {
+    throw new Error("Failed to resolve S3 bucket name from Remotion configuration.");
+  }
+
+  await s3Client.send(
+    new PutObjectCommand({
+      Bucket: bucketName,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+      ContentLength: contentLength,
+    })
+  );
+
+  return `https://${bucketName}.s3.${region}.amazonaws.com/${key}`;
+}
 
 export function getS3BucketAndKey(fileUrl: string) {
   const url = new URL(fileUrl);

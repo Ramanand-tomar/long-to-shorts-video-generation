@@ -4,7 +4,7 @@ import { videos, clips, pipelineRuns, users, socialConnections } from "@/lib/db/
 import { eq, asc, and, gte, lte } from "drizzle-orm";
 import { renderMediaOnLambda, getRenderProgress, AwsRegion } from "@remotion/lambda";
 import { publishToZernio } from "@/lib/zernio";
-import { deleteFileFromS3 } from "@/lib/s3";
+import { deleteFileFromS3, uploadStreamToS3, getPlayableUrl } from "@/lib/s3";
 import { sendCompletionEmail, sendFailureEmail } from "@/lib/email";
 import { uploadVideoToYouTube } from "@/lib/youtube";
 import { StyleConfig } from "@/components/remotion/ClipComposition";
@@ -144,6 +144,100 @@ export const autoPipeline = inngest.createFunction(
           .where(eq(videos.id, videoId));
       });
 
+      // 1.5 Prepare Video Source (Clone Google Drive video to S3 if needed)
+      await step.run("prepare-video-source", async () => {
+        const [video] = await db
+          .select()
+          .from(videos)
+          .where(eq(videos.id, videoId))
+          .limit(1);
+
+        if (!video) {
+          throw new Error(`Video record not found for ID: ${videoId}`);
+        }
+
+        if (video.sourceType === "gdrive" && video.gdriveFileId) {
+          // Check if we already cloned it to S3
+          if (video.videoUrl.includes(".amazonaws.com/")) {
+            return;
+          }
+
+          // Get fresh Google Drive token
+          const [conn] = await db
+            .select()
+            .from(socialConnections)
+            .where(
+              and(
+                eq(socialConnections.userId, userId),
+                eq(socialConnections.platform, "gdrive")
+              )
+            )
+            .limit(1);
+
+          if (!conn || !conn.refreshToken) {
+            throw new Error("Google Drive connection is missing. Please reconnect Google Drive.");
+          }
+
+          const clientId = process.env.YOUTUBE_CLIENT_ID;
+          const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
+          let rawRefreshToken = conn.refreshToken;
+          if (rawRefreshToken && (rawRefreshToken.startsWith("v1:") || rawRefreshToken.includes(":"))) {
+            rawRefreshToken = decrypt(rawRefreshToken);
+          }
+
+          const refreshResponse = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              client_id: clientId!,
+              client_secret: clientSecret!,
+              refresh_token: rawRefreshToken,
+              grant_type: "refresh_token",
+            }),
+          });
+
+          if (!refreshResponse.ok) {
+            throw new Error(`Failed to refresh Google Drive token: ${await refreshResponse.text()}`);
+          }
+
+          const refreshData = await refreshResponse.json();
+          const accessToken = refreshData.access_token;
+
+          // Fetch stream from Google Drive
+          const driveRes = await fetch(`https://www.googleapis.com/drive/v3/files/${video.gdriveFileId}?alt=media`, {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          });
+
+          if (!driveRes.ok) {
+            throw new Error(`Failed to fetch file stream from Google Drive: ${await driveRes.text()}`);
+          }
+
+          if (!driveRes.body) {
+            throw new Error("Google Drive response body is empty.");
+          }
+
+          // Upload stream to S3
+          const s3Key = `vidshort/uploads/${videoId}.mp4`;
+          const s3Url = await uploadStreamToS3(
+            driveRes.body,
+            s3Key,
+            "video/mp4",
+            video.fileSize || 0
+          );
+
+          // Update database with the new S3 URL
+          await db
+            .update(videos)
+            .set({
+              videoUrl: s3Url,
+              updatedAt: new Date(),
+            })
+            .where(eq(videos.id, videoId));
+        }
+      });
+
       // 2. Transcribe Video using Deepgram
       const transcriptData = await step.run("transcribe-video", async () => {
         const [video] = await db
@@ -161,6 +255,9 @@ export const autoPipeline = inngest.createFunction(
           throw new Error("DEEPGRAM_API_KEY is not configured properly in environmental variables.");
         }
 
+        // Generate a temporary signed S3 URL for Deepgram to access safely
+        const transcriptionUrl = await getPlayableUrl(video.videoUrl);
+
         const response = await fetch(
           "https://api.deepgram.com/v1/listen?smart_format=true&punctuate=true&model=nova-2&detect_language=true",
           {
@@ -169,7 +266,7 @@ export const autoPipeline = inngest.createFunction(
               Authorization: `Token ${deepgramKey}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({ url: video.videoUrl }),
+            body: JSON.stringify({ url: transcriptionUrl }),
           }
         );
 

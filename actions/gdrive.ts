@@ -159,23 +159,6 @@ export async function submitGoogleDriveVideo(driveUrl: string) {
           contentType = metaData.mimeType || contentType;
           title = metaData.name || title;
           isPrivate = true;
-
-          // Temporarily make the file publicly readable by everyone with link
-          const permResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              role: "reader",
-              type: "anyone",
-            }),
-          });
-
-          if (!permResponse.ok) {
-            console.error("Failed to set temporary public permission:", await permResponse.text());
-          }
         }
       } catch (authErr) {
         console.error("Failed to query Google Drive API with OAuth. Trying public fallback...", authErr);
