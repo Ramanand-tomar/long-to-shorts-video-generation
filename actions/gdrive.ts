@@ -1,10 +1,97 @@
 "use server";
 
 import { db } from "@/lib/db";
-import { videos, pipelineRuns } from "@/lib/db/schema";
+import { videos, pipelineRuns, socialConnections } from "@/lib/db/schema";
 import { getCurrentUser } from "@/lib/db/user";
 import { inngest } from "@/lib/inngest/client";
 import { revalidatePath } from "next/cache";
+import { eq, and } from "drizzle-orm";
+import { decrypt } from "@/lib/encryption";
+
+async function refreshGoogleDriveAccessToken(encryptedRefreshToken: string): Promise<string> {
+  const clientId = process.env.YOUTUBE_CLIENT_ID;
+  const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
+  let rawRefreshToken = encryptedRefreshToken;
+  if (rawRefreshToken && (rawRefreshToken.startsWith("v1:") || rawRefreshToken.includes(":"))) {
+    try {
+      rawRefreshToken = decrypt(rawRefreshToken);
+    } catch (err) {
+      console.error("Failed to decrypt GDrive refresh token:", err);
+    }
+  }
+
+  if (!clientId || !clientSecret || !rawRefreshToken) {
+    throw new Error("Missing OAuth credentials for Google Drive.");
+  }
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: rawRefreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Failed to refresh GDrive token: ${errText}`);
+  }
+
+  const data = await response.json();
+  return data.access_token;
+}
+
+export async function getGoogleDriveConnection() {
+  try {
+    const user = await getCurrentUser();
+    if (!user) return null;
+
+    const [conn] = await db
+      .select({
+        id: socialConnections.id,
+        profileName: socialConnections.profileName,
+      })
+      .from(socialConnections)
+      .where(
+        and(
+          eq(socialConnections.userId, user.id),
+          eq(socialConnections.platform, "gdrive")
+        )
+      )
+      .limit(1);
+
+    return conn || null;
+  } catch (error) {
+    console.error("Failed to get Google Drive connection:", error);
+    return null;
+  }
+}
+
+export async function disconnectGoogleDrive() {
+  try {
+    const user = await getCurrentUser();
+    if (!user) return { error: "unauthorized" };
+
+    await db
+      .delete(socialConnections)
+      .where(
+        and(
+          eq(socialConnections.userId, user.id),
+          eq(socialConnections.platform, "gdrive")
+        )
+      );
+
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to disconnect Google Drive:", error);
+    return { error: "internal_server_error" };
+  }
+}
 
 export async function submitGoogleDriveVideo(driveUrl: string) {
   try {
@@ -22,18 +109,77 @@ export async function submitGoogleDriveVideo(driveUrl: string) {
     }
 
     const directUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+    let fileSize = 0;
+    let contentType = "video/mp4";
+    let title = `GDrive Video - ${fileId}`;
+    let isPrivate = false;
 
-    const headResponse = await fetch(directUrl, { method: "HEAD" });
-    if (!headResponse.ok) {
-      return { 
-        error: "inaccessible_file", 
-        message: "Google Drive file is inaccessible. Please ensure 'Anyone with the link can view' is enabled." 
-      };
+    // Check if the user has Google Drive OAuth linked
+    const [conn] = await db
+      .select()
+      .from(socialConnections)
+      .where(
+        and(
+          eq(socialConnections.userId, user.id),
+          eq(socialConnections.platform, "gdrive")
+        )
+      )
+      .limit(1);
+
+    if (conn && conn.refreshToken) {
+      try {
+        const accessToken = await refreshGoogleDriveAccessToken(conn.refreshToken);
+        
+        // Fetch metadata from Google API to check file size and title
+        const metaResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType,size`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        if (metaResponse.ok) {
+          const metaData = await metaResponse.json();
+          fileSize = metaData.size ? parseInt(metaData.size, 10) : 0;
+          contentType = metaData.mimeType || contentType;
+          title = metaData.name || title;
+          isPrivate = true;
+
+          // Temporarily make the file publicly readable by everyone with link
+          const permResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              role: "reader",
+              type: "anyone",
+            }),
+          });
+
+          if (!permResponse.ok) {
+            console.error("Failed to set temporary public permission:", await permResponse.text());
+          }
+        }
+      } catch (authErr) {
+        console.error("Failed to query Google Drive API with OAuth. Trying public fallback...", authErr);
+      }
     }
 
-    const contentType = headResponse.headers.get("Content-Type") || "";
-    const contentLengthStr = headResponse.headers.get("Content-Length");
-    const fileSize = contentLengthStr ? parseInt(contentLengthStr, 10) : 0;
+    if (!isPrivate) {
+      // Public file fallback check
+      const headResponse = await fetch(directUrl, { method: "HEAD" });
+      if (!headResponse.ok) {
+        return { 
+          error: "inaccessible_file", 
+          message: "Google Drive file is inaccessible. Please link Google Drive in modal, or ensure 'Anyone with the link can view' is enabled." 
+        };
+      }
+
+      contentType = headResponse.headers.get("Content-Type") || "";
+      const contentLengthStr = headResponse.headers.get("Content-Length");
+      fileSize = contentLengthStr ? parseInt(contentLengthStr, 10) : 0;
+    }
 
     if (contentType.includes("html") || contentType.includes("json") || contentType.includes("text")) {
       return { 
@@ -42,13 +188,12 @@ export async function submitGoogleDriveVideo(driveUrl: string) {
       };
     }
 
-    const title = `GDrive Video - ${fileId}`;
     const [newVideo] = await db
       .insert(videos)
       .values({
         userId: user.id,
         title: title,
-        fileName: `${fileId}.mp4`,
+        fileName: title.endsWith(".mp4") || title.endsWith(".mov") || title.endsWith(".webm") ? title : `${title}.mp4`,
         fileSize: fileSize,
         videoUrl: directUrl,
         sourceType: "gdrive",

@@ -9,6 +9,7 @@ import { sendCompletionEmail, sendFailureEmail } from "@/lib/email";
 import { uploadVideoToYouTube } from "@/lib/youtube";
 import { StyleConfig } from "@/components/remotion/ClipComposition";
 import { v2 as cloudinary } from 'cloudinary';
+import { decrypt } from "@/lib/encryption";
 
 interface EventData {
   videoId: string;
@@ -191,14 +192,85 @@ export const autoPipeline = inngest.createFunction(
           .where(eq(videos.id, videoId));
       });
 
-      // Get the video duration to divide it into chunks
+      // Get the video details to check duration and gdrive source
       const [videoInfo] = await db
-        .select({ duration: videos.duration })
+        .select()
         .from(videos)
         .where(eq(videos.id, videoId))
         .limit(1);
 
-      const videoDuration = videoInfo?.duration && videoInfo.duration > 0 ? videoInfo.duration : 900;
+      if (!videoInfo) {
+        throw new Error(`Video record not found for ID: ${videoId}`);
+      }
+
+      const videoDuration = videoInfo.duration && videoInfo.duration > 0 ? videoInfo.duration : 900;
+
+      // 2.5 Revoke temporary Google Drive permissions
+      if (videoInfo.sourceType === "gdrive" && videoInfo.gdriveFileId) {
+        await step.run("cleanup-gdrive-permissions", async () => {
+          const [conn] = await db
+            .select()
+            .from(socialConnections)
+            .where(
+              and(
+                eq(socialConnections.userId, userId),
+                eq(socialConnections.platform, "gdrive")
+              )
+            )
+            .limit(1);
+
+          if (conn && conn.refreshToken) {
+            try {
+              const clientId = process.env.YOUTUBE_CLIENT_ID;
+              const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
+              let rawRefreshToken = conn.refreshToken;
+              if (rawRefreshToken && (rawRefreshToken.startsWith("v1:") || rawRefreshToken.includes(":"))) {
+                rawRefreshToken = decrypt(rawRefreshToken);
+              }
+              const refreshResponse = await fetch("https://oauth2.googleapis.com/token", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                  client_id: clientId!,
+                  client_secret: clientSecret!,
+                  refresh_token: rawRefreshToken,
+                  grant_type: "refresh_token",
+                }),
+              });
+              if (refreshResponse.ok) {
+                const refreshData = await refreshResponse.json();
+                const accessToken = refreshData.access_token;
+
+                const fileId = videoInfo.gdriveFileId;
+                const listPermResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions?fields=permissions(id,type,role)`, {
+                  headers: { Authorization: `Bearer ${accessToken}` }
+                });
+
+                if (listPermResponse.ok) {
+                  const listData = await listPermResponse.json();
+                  const permissions = listData.permissions || [];
+                  const anyonePerm = permissions.find((p: any) => p.type === "anyone" && p.role === "reader");
+
+                  if (anyonePerm && anyonePerm.id) {
+                    const delResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions/${anyonePerm.id}`, {
+                      method: "DELETE",
+                      headers: { Authorization: `Bearer ${accessToken}` }
+                    });
+                    if (delResponse.ok) {
+                      console.log("Successfully revoked temporary Google Drive public permission.");
+                    } else {
+                      console.error("Failed to revoke public permission:", await delResponse.text());
+                    }
+                  }
+                }
+              }
+            } catch (err) {
+              console.error("Error during temporary Google Drive permissions cleanup:", err);
+            }
+          }
+        });
+      }
+
       const CHUNK_DURATION = 15 * 60; // 15 minutes in seconds
       const numChunks = Math.ceil(videoDuration / CHUNK_DURATION);
 
@@ -814,6 +886,71 @@ Reply strictly with a JSON object:
         }
       } catch (cleanupErr) {
         console.error("Failed to clean up Cloudinary asset after failure:", cleanupErr);
+      }
+
+      // Try to clean up temporary Google Drive permissions if we failed
+      try {
+        const [videoRecord] = await db
+          .select()
+          .from(videos)
+          .where(eq(videos.id, videoId))
+          .limit(1);
+
+        if (videoRecord && videoRecord.sourceType === "gdrive" && videoRecord.gdriveFileId) {
+          const [conn] = await db
+            .select()
+            .from(socialConnections)
+            .where(
+              and(
+                eq(socialConnections.userId, userId),
+                eq(socialConnections.platform, "gdrive")
+              )
+            )
+            .limit(1);
+
+          if (conn && conn.refreshToken) {
+            const clientId = process.env.YOUTUBE_CLIENT_ID;
+            const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
+            let rawRefreshToken = conn.refreshToken;
+            if (rawRefreshToken && (rawRefreshToken.startsWith("v1:") || rawRefreshToken.includes(":"))) {
+              rawRefreshToken = decrypt(rawRefreshToken);
+            }
+            const refreshResponse = await fetch("https://oauth2.googleapis.com/token", {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams({
+                client_id: clientId!,
+                client_secret: clientSecret!,
+                refresh_token: rawRefreshToken,
+                grant_type: "refresh_token",
+              }),
+            });
+            if (refreshResponse.ok) {
+              const refreshData = await refreshResponse.json();
+              const accessToken = refreshData.access_token;
+              const fileId = videoRecord.gdriveFileId;
+              const listPermResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions?fields=permissions(id,type,role)`, {
+                headers: { Authorization: `Bearer ${accessToken}` }
+              });
+
+              if (listPermResponse.ok) {
+                const listData = await listPermResponse.json();
+                const permissions = listData.permissions || [];
+                const anyonePerm = permissions.find((p: any) => p.type === "anyone" && p.role === "reader");
+
+                if (anyonePerm && anyonePerm.id) {
+                  await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions/${anyonePerm.id}`, {
+                    method: "DELETE",
+                    headers: { Authorization: `Bearer ${accessToken}` }
+                  });
+                  console.log("Successfully revoked temporary Google Drive public permission in catch block.");
+                }
+              }
+            }
+          }
+        }
+      } catch (gdriveCleanupErr) {
+        console.error("Failed to clean up Google Drive permissions after failure:", gdriveCleanupErr);
       }
 
       await db

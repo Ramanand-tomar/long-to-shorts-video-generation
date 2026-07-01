@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { submitGoogleDriveVideo } from "@/actions/gdrive";
-import { Link2, X, AlertCircle, Loader2, Play } from "lucide-react";
+import { submitGoogleDriveVideo, getGoogleDriveConnection, disconnectGoogleDrive } from "@/actions/gdrive";
+import { Link2, X, AlertCircle, Loader2, Play, CheckCircle2 } from "lucide-react";
 
 interface GoogleDriveModalProps {
   isOpen: boolean;
@@ -16,6 +16,34 @@ export default function GoogleDriveModal({ isOpen, onClose, onSuccess }: GoogleD
   const [driveUrl, setDriveUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  const [gdriveConnected, setGdriveConnected] = useState(false);
+  const [gdriveProfile, setGdriveProfile] = useState<string | null>(null);
+  const [loadingConnection, setLoadingConnection] = useState(true);
+
+  useEffect(() => {
+    if (isOpen) {
+      checkConnection();
+    }
+  }, [isOpen]);
+
+  const checkConnection = async () => {
+    setLoadingConnection(true);
+    try {
+      const conn = await getGoogleDriveConnection();
+      if (conn) {
+        setGdriveConnected(true);
+        setGdriveProfile(conn.profileName);
+      } else {
+        setGdriveConnected(false);
+        setGdriveProfile(null);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingConnection(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -93,6 +121,47 @@ export default function GoogleDriveModal({ isOpen, onClose, onSuccess }: GoogleD
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Google Drive Account Connection status */}
+          <div className="p-4 bg-zinc-950/40 border border-zinc-800 rounded-2xl flex items-center justify-between gap-4">
+            {loadingConnection ? (
+              <div className="flex items-center gap-2 text-zinc-500 text-xs">
+                <Loader2 className="w-4 h-4 animate-spin text-violet-500" />
+                <span>Checking account connection...</span>
+              </div>
+            ) : gdriveConnected ? (
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-2 text-emerald-400 text-xs">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Linked as <strong className="text-zinc-200">{gdriveProfile}</strong></span>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setLoadingConnection(true);
+                    await disconnectGoogleDrive();
+                    await checkConnection();
+                  }}
+                  className="text-rose-400 hover:text-rose-300 text-xs font-semibold hover:underline"
+                >
+                  Disconnect
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-2 text-zinc-400 text-xs">
+                  <AlertCircle className="w-4 h-4 text-zinc-500" />
+                  <span>Connect your drive to import private files</span>
+                </div>
+                <a
+                  href="/api/auth/gdrive/start"
+                  className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition-colors"
+                >
+                  Connect
+                </a>
+              </div>
+            )}
+          </div>
+
           {/* Input field */}
           <div>
             <label className="block text-zinc-300 font-bold text-xs uppercase tracking-wider mb-2">Google Drive URL</label>
@@ -113,7 +182,11 @@ export default function GoogleDriveModal({ isOpen, onClose, onSuccess }: GoogleD
 
           {/* Sharing Help Info */}
           <div className="p-4 rounded-2xl bg-violet-600/5 border border-violet-500/10 text-violet-300/80 text-xs leading-relaxed">
-            Please make sure that the sharing setting of your Google Drive video is configured to <strong>&ldquo;Anyone with the link can view&rdquo;</strong> so the background pipeline can download and process it.
+            {gdriveConnected ? (
+              <span>✓ <strong>Google Drive connected.</strong> You can paste links to your <strong>private files</strong> (no public sharing settings required!). Files up to 2GB are supported.</span>
+            ) : (
+              <span>Please connect your Google Drive above to process private files. Otherwise, make sure your sharing setting is configured to <strong>&ldquo;Anyone with the link can view&rdquo;</strong>.</span>
+            )}
           </div>
 
           {/* Auto settings list */}
