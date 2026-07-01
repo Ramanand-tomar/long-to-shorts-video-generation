@@ -10,6 +10,7 @@ import { uploadVideoToYouTube } from "@/lib/youtube";
 import { StyleConfig } from "@/components/remotion/ClipComposition";
 import { v2 as cloudinary } from 'cloudinary';
 import { decrypt } from "@/lib/encryption";
+import { Readable } from "stream";
 
 interface EventData {
   videoId: string;
@@ -221,7 +222,7 @@ export const autoPipeline = inngest.createFunction(
           // Upload stream to S3
           const s3Key = `vidshort/uploads/${videoId}.mp4`;
           const s3Url = await uploadStreamToS3(
-            driveRes.body,
+            Readable.fromWeb(driveRes.body as Parameters<typeof Readable.fromWeb>[0]),
             s3Key,
             "video/mp4",
             video.fileSize || 0
