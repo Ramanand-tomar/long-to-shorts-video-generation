@@ -1,7 +1,7 @@
 import { inngest } from "../client";
 import { db } from "@/lib/db";
 import { videos, clips, pipelineRuns, users, socialConnections } from "@/lib/db/schema";
-import { eq, asc, and } from "drizzle-orm";
+import { eq, asc, and, gte, lte } from "drizzle-orm";
 import { renderMediaOnLambda, getRenderProgress, AwsRegion } from "@remotion/lambda";
 import { publishToZernio } from "@/lib/zernio";
 import { deleteFileFromS3 } from "@/lib/s3";
@@ -191,29 +191,47 @@ export const autoPipeline = inngest.createFunction(
           .where(eq(videos.id, videoId));
       });
 
-      // 3. Extract Clips with Gemini
-      const suggestedClips = await step.run("extract-clips-with-gemini", async () => {
-        const geminiKey = process.env.GEMINI_API_KEY;
-        if (!geminiKey || geminiKey.includes("placeholder") || geminiKey.startsWith("your_")) {
-          throw new Error("GEMINI_API_KEY is not configured properly.");
-        }
+      // Get the video duration to divide it into chunks
+      const [videoInfo] = await db
+        .select({ duration: videos.duration })
+        .from(videos)
+        .where(eq(videos.id, videoId))
+        .limit(1);
 
-        const alternatives = transcriptData.results?.channels?.[0]?.alternatives?.[0];
-        const words = alternatives?.words || [];
-        const fullText = alternatives?.transcript || "";
+      const videoDuration = videoInfo?.duration && videoInfo.duration > 0 ? videoInfo.duration : 900;
+      const CHUNK_DURATION = 15 * 60; // 15 minutes in seconds
+      const numChunks = Math.ceil(videoDuration / CHUNK_DURATION);
 
-        let formattedTranscript = "";
-        if (words.length > 0) {
-          formattedTranscript = (words as Array<{ start: number; end: number; word: string }>)
-            .map((w) => `[${w.start.toFixed(2)}s - ${w.end.toFixed(2)}s]: ${w.word}`)
-            .join(" ");
-        } else {
-          formattedTranscript = fullText;
-        }
+      for (let chunkIdx = 0; chunkIdx < numChunks; chunkIdx++) {
+        const chunkStart = chunkIdx * CHUNK_DURATION;
+        const chunkEnd = Math.min((chunkIdx + 1) * CHUNK_DURATION, videoDuration);
 
-        const prompt = `
-You are an expert AI video editor. I will provide you with the transcript of a long-form video, annotated with timestamps for each word.
-Your goal is to identify the top 4-5 highly engaging, contextually complete, and viral clips from this transcript that are suitable for social media (TikTok, YouTube Shorts, Reels).
+        // 3. Extract Clips with Gemini for this chunk
+        const suggestedClips = await step.run(`extract-clips-with-gemini-chunk-${chunkIdx}`, async () => {
+          const geminiKey = process.env.GEMINI_API_KEY;
+          if (!geminiKey || geminiKey.includes("placeholder") || geminiKey.startsWith("your_")) {
+            throw new Error("GEMINI_API_KEY is not configured properly.");
+          }
+
+          const alternatives = transcriptData.results?.channels?.[0]?.alternatives?.[0];
+          const words = alternatives?.words || [];
+          const fullText = alternatives?.transcript || "";
+
+          // Filter words that belong to this chunk's timeline
+          const chunkWords = (words as TranscriptWord[]).filter((w: TranscriptWord) => w.start >= chunkStart && w.start <= chunkEnd);
+
+          let formattedTranscript = "";
+          if (chunkWords.length > 0) {
+            formattedTranscript = (chunkWords as Array<{ start: number; end: number; word: string }>)
+              .map((w) => `[${w.start.toFixed(2)}s - ${w.end.toFixed(2)}s]: ${w.word}`)
+              .join(" ");
+          } else {
+            formattedTranscript = fullText;
+          }
+
+          const prompt = `
+You are an expert AI video editor. I will provide you with the transcript of a segment of a long-form video (specifically from ${chunkStart}s to ${chunkEnd}s of the video), annotated with timestamps for each word.
+Your goal is to identify the top 1-2 highly engaging, contextually complete, and viral clips from this transcript that are suitable for social media (TikTok, YouTube Shorts, Reels).
 
 Guidelines:
 1. Each clip must have a strong hook (compelling first few words).
@@ -222,13 +240,12 @@ Guidelines:
 4. Keep the clips contextually complete (don't cut off mid-thought).
 5. Language optimization: Detect the primary language spoken in the transcript. If the transcript is in Hindi (whether written in Devanagari script or romanized Hinglish/Latin characters like "aaj hum baat karenge"), you MUST write the output fields 'title', 'description', 'reason', 'hookText', and 'captionText' in Hindi (using Devanagari script). If it is in another language, write those fields in that respective language. Otherwise, default to English.
 
-Transcript:
+Transcript for this segment:
 ---
 ${formattedTranscript.substring(0, 40000)}
 ---
 
 You MUST reply strictly with a JSON array (no markdown block wrapper, just raw JSON) conforming to this TypeScript type:
-\`\`\`typescript
 Array<{
   title: string;
   description: string;
@@ -241,31 +258,143 @@ Array<{
   captionText: string; // Suggested social media caption
   hashtags: string[]; // Suggested hashtags as a string array
 }>
-\`\`\`
 `;
 
-        const jsonText = await callGemini(prompt, geminiKey);
-        const parsed = JSON.parse(jsonText) as SuggestedClip[];
+          const jsonText = await callGemini(prompt, geminiKey);
+          const parsed = JSON.parse(jsonText) as SuggestedClip[];
 
-        if (!Array.isArray(parsed)) {
-          throw new Error("Gemini response is not a valid JSON array.");
-        }
+          if (!Array.isArray(parsed)) {
+            throw new Error("Gemini response is not a valid JSON array.");
+          }
 
-        return parsed;
-      });
+          return parsed;
+        });
 
-      // 4. Save suggested clips to DB & update total count
-      await step.run("save-clips-to-db", async () => {
-        for (const c of suggestedClips) {
-          await db.insert(clips).values({
-            videoId: videoId,
-            title: c.title,
-            description: c.description || c.hookText || c.hook || null,
-            startTime: c.startTime,
-            endTime: c.endTime,
-            confidenceScore: c.confidenceScore || 0.8,
-            renderStatus: "not_started",
-            subtitleStyle: {
+        // 4. Save suggested clips to DB & update total count
+        await step.run(`save-clips-to-db-chunk-${chunkIdx}`, async () => {
+          for (const c of suggestedClips) {
+            await db.insert(clips).values({
+              videoId: videoId,
+              title: c.title,
+              description: c.description || c.hookText || c.hook || null,
+              startTime: c.startTime,
+              endTime: c.endTime,
+              confidenceScore: c.confidenceScore || 0.8,
+              renderStatus: "not_started",
+              subtitleStyle: {
+                fontFamily: "Inter",
+                fontSize: 80,
+                captionColor: "#ffffff",
+                highlightColor: "#fbbf24",
+                textPosition: "bottom",
+                backgroundStyle: "box",
+                emphasisAnimation: "pop",
+                layoutType: "fit_black",
+                layoutTitleText: "wait for end",
+                isMirrored: false,
+                playbackSpeed: 1.02,
+              },
+              seoScore: c.seoScore ?? (c.confidenceScore ? Math.round(c.confidenceScore * 100) : 80),
+              hookText: c.hookText || c.hook || null,
+              captionText: c.captionText || null,
+              hashtags: c.hashtags || null,
+              reason: c.reason || null,
+            });
+          }
+
+          const [run] = await db
+            .select()
+            .from(pipelineRuns)
+            .where(eq(pipelineRuns.id, pipelineRunId))
+            .limit(1);
+
+          await db
+            .update(pipelineRuns)
+            .set({
+              totalClips: (run?.totalClips || 0) + suggestedClips.length,
+              status: "rendering",
+              updatedAt: new Date(),
+            })
+            .where(eq(pipelineRuns.id, pipelineRunId));
+        });
+
+        // 5. Fetch clips list in this chunk range
+        const chunkClips = await step.run(`fetch-clips-list-chunk-${chunkIdx}`, async () => {
+          return await db
+            .select({ id: clips.id, title: clips.title })
+            .from(clips)
+            .where(
+              and(
+                eq(clips.videoId, videoId),
+                gte(clips.startTime, chunkStart),
+                lte(clips.startTime, chunkEnd)
+              )
+            )
+            .orderBy(asc(clips.startTime));
+        });
+
+        const totalChunkClips = chunkClips.length;
+
+        // 6. Sequential Loop: Render -> Metadata -> Upload -> Delete S3 -> Sleep 1m
+        for (let i = 0; i < totalChunkClips; i++) {
+          const currentClipId = chunkClips[i].id;
+
+          // First, mark the clip as rendering
+          await step.run(`mark-rendering-chunk-${chunkIdx}-clip-${i}`, async () => {
+            await db
+              .update(clips)
+              .set({
+                renderStatus: "rendering",
+                updatedAt: new Date(),
+              })
+              .where(eq(clips.id, currentClipId));
+          });
+
+          // Trigger the render on AWS Lambda as a single discrete step
+          const renderResult = await step.run(`trigger-lambda-render-chunk-${chunkIdx}-clip-${i}`, async () => {
+            const [clip] = await db
+              .select()
+              .from(clips)
+              .where(eq(clips.id, currentClipId))
+              .limit(1);
+
+            const [video] = await db
+              .select()
+              .from(videos)
+              .where(eq(videos.id, videoId))
+              .limit(1);
+
+            const awsKey = process.env.REMOTION_AWS_ACCESS_KEY_ID;
+            const awsSecret = process.env.REMOTION_AWS_SECRET_ACCESS_KEY;
+            const awsRegion = (process.env.REMOTION_AWS_REGION || "us-east-1") as AwsRegion;
+            const functionName = process.env.REMOTION_LAMBDA_FUNCTION_NAME;
+            const serveUrl = process.env.REMOTION_SERVE_URL || process.env.REMOTION_S3_SITE_NAME;
+
+            const isConfigMissing =
+              !awsKey ||
+              awsKey.includes("placeholder") ||
+              !awsSecret ||
+              awsSecret.includes("placeholder") ||
+              !functionName ||
+              functionName.includes("placeholder") ||
+              !serveUrl;
+
+            if (isConfigMissing) {
+              throw new Error("Remotion Lambda AWS settings are not configured. Please check .env.local.");
+            }
+
+            const fps = 30;
+            const startFrame = Math.round(clip.startTime * fps);
+            const endFrame = Math.round(clip.endTime * fps);
+
+            const transData = video.transcript as unknown as TranscriptPayload | null;
+            const alternatives = transData?.results?.channels?.[0]?.alternatives?.[0];
+            const allWords = alternatives?.words || [];
+            const clipWords = allWords.filter(
+              (w) => w.start >= clip.startTime && w.start <= clip.endTime
+            );
+
+            const styleConfig = (clip.subtitleStyle as StyleConfig | null) || {
               fontFamily: "Inter",
               fontSize: 80,
               captionColor: "#ffffff",
@@ -277,411 +406,309 @@ Array<{
               layoutTitleText: "wait for end",
               isMirrored: false,
               playbackSpeed: 1.02,
-            },
-            seoScore: c.seoScore ?? (c.confidenceScore ? Math.round(c.confidenceScore * 100) : 80),
-            hookText: c.hookText || c.hook || null,
-            captionText: c.captionText || null,
-            hashtags: c.hashtags || null,
-            reason: c.reason || null,
-          });
-        }
+            };
 
-        await db
-          .update(pipelineRuns)
-          .set({
-            totalClips: suggestedClips.length,
-            status: "rendering",
-            updatedAt: new Date(),
-          })
-          .where(eq(pipelineRuns.id, pipelineRunId));
-      });
+            const speed = styleConfig.playbackSpeed || 1.0;
+            const inputProps = {
+              videoUrl: video.videoUrl,
+              startFrame,
+              endFrame,
+              transcriptSegments: clipWords,
+              styleConfig,
+            };
 
-      // 5. Fetch all clips in chronological order
-      const clipRecs = await step.run("fetch-clips-list", async () => {
-        return await db
-          .select({ id: clips.id, title: clips.title })
-          .from(clips)
-          .where(eq(clips.videoId, videoId))
-          .orderBy(asc(clips.startTime));
-      });
+            const durationInFrames = Math.max(30, Math.round((endFrame - startFrame) / speed));
 
-      const totalClips = clipRecs.length;
+            const concurrencyEnv = process.env.REMOTION_CONCURRENCY
+              ? parseInt(process.env.REMOTION_CONCURRENCY, 10)
+              : undefined;
+            const framesPerLambdaEnv = process.env.REMOTION_FRAMES_PER_LAMBDA
+              ? parseInt(process.env.REMOTION_FRAMES_PER_LAMBDA, 10)
+              : undefined;
 
-      // 6. Sequential Loop: Render -> Metadata -> Upload -> Delete S3 -> Sleep 1h
-      for (let i = 0; i < totalClips; i++) {
-        const currentClipId = clipRecs[i].id;
+            let concurrencyOption: number | undefined = undefined;
+            let framesPerLambdaOption: number | undefined = undefined;
 
-        // 4. Render Clip using Remotion Lambda
-        // First, mark the clip as rendering
-        await step.run(`mark-rendering-${i}`, async () => {
-          await db
-            .update(clips)
-            .set({
-              renderStatus: "rendering",
-              updatedAt: new Date(),
-            })
-            .where(eq(clips.id, currentClipId));
-        });
+            if (framesPerLambdaEnv !== undefined) {
+              framesPerLambdaOption = framesPerLambdaEnv;
+            } else if (concurrencyEnv !== undefined) {
+              concurrencyOption = concurrencyEnv;
+            } else {
+              concurrencyOption = 1;
+            }
 
-        // Trigger the render on AWS Lambda as a single discrete step
-        const renderResult = await step.run(`trigger-lambda-render-${i}`, async () => {
-          const [clip] = await db
-            .select()
-            .from(clips)
-            .where(eq(clips.id, currentClipId))
-            .limit(1);
-
-          const [video] = await db
-            .select()
-            .from(videos)
-            .where(eq(videos.id, videoId))
-            .limit(1);
-
-          const awsKey = process.env.REMOTION_AWS_ACCESS_KEY_ID;
-          const awsSecret = process.env.REMOTION_AWS_SECRET_ACCESS_KEY;
-          const awsRegion = (process.env.REMOTION_AWS_REGION || "us-east-1") as AwsRegion;
-          const functionName = process.env.REMOTION_LAMBDA_FUNCTION_NAME;
-          const serveUrl = process.env.REMOTION_SERVE_URL || process.env.REMOTION_S3_SITE_NAME;
-
-          const isConfigMissing =
-            !awsKey ||
-            awsKey.includes("placeholder") ||
-            !awsSecret ||
-            awsSecret.includes("placeholder") ||
-            !functionName ||
-            functionName.includes("placeholder") ||
-            !serveUrl;
-
-          if (isConfigMissing) {
-            throw new Error("Remotion Lambda AWS settings are not configured. Please check .env.local.");
-          }
-
-          const fps = 30;
-          const startFrame = Math.round(clip.startTime * fps);
-          const endFrame = Math.round(clip.endTime * fps);
-
-          const transData = video.transcript as unknown as TranscriptPayload | null;
-          const alternatives = transData?.results?.channels?.[0]?.alternatives?.[0];
-          const allWords = alternatives?.words || [];
-          const clipWords = allWords.filter(
-            (w) => w.start >= clip.startTime && w.start <= clip.endTime
-          );
-
-          const styleConfig = (clip.subtitleStyle as StyleConfig | null) || {
-            fontFamily: "Inter",
-            fontSize: 80,
-            captionColor: "#ffffff",
-            highlightColor: "#fbbf24",
-            textPosition: "bottom",
-            backgroundStyle: "box",
-            emphasisAnimation: "pop",
-            layoutType: "fit_black",
-            layoutTitleText: "wait for end",
-            isMirrored: false,
-            playbackSpeed: 1.02,
-          };
-
-          const speed = styleConfig.playbackSpeed || 1.0;
-          const inputProps = {
-            videoUrl: video.videoUrl,
-            startFrame,
-            endFrame,
-            transcriptSegments: clipWords,
-            styleConfig,
-          };
-
-          const durationInFrames = Math.max(30, Math.round((endFrame - startFrame) / speed));
-
-          const concurrencyEnv = process.env.REMOTION_CONCURRENCY
-            ? parseInt(process.env.REMOTION_CONCURRENCY, 10)
-            : undefined;
-          const framesPerLambdaEnv = process.env.REMOTION_FRAMES_PER_LAMBDA
-            ? parseInt(process.env.REMOTION_FRAMES_PER_LAMBDA, 10)
-            : undefined;
-
-          let concurrencyOption: number | undefined = undefined;
-          let framesPerLambdaOption: number | undefined = undefined;
-
-          if (framesPerLambdaEnv !== undefined) {
-            framesPerLambdaOption = framesPerLambdaEnv;
-          } else if (concurrencyEnv !== undefined) {
-            concurrencyOption = concurrencyEnv;
-          } else {
-            concurrencyOption = 1;
-          }
-
-          const result = await renderMediaOnLambda({
-            functionName: functionName!,
-            region: awsRegion,
-            serveUrl: serveUrl!,
-            composition: "ClipComposition",
-            inputProps,
-            codec: "h264",
-            privacy: "public",
-            forceDurationInFrames: durationInFrames,
-            ...(concurrencyOption !== undefined ? { concurrency: concurrencyOption } : {}),
-            ...(framesPerLambdaOption !== undefined ? { framesPerLambda: framesPerLambdaOption } : {}),
-          });
-
-          return {
-            renderId: result.renderId,
-            bucketName: result.bucketName,
-            awsRegion,
-            functionName: functionName!
-          };
-        });
-
-        // Poll progress outside step.run using Inngest step.sleep to prevent Vercel execution timeouts
-        let isDone = false;
-        let attempts = 0;
-        const maxAttempts = 180;
-
-        while (!isDone && attempts < maxAttempts) {
-          attempts++;
-
-          const progress = await step.run(`check-progress-clip-${i}-attempt-${attempts}`, async () => {
-            return await getRenderProgress({
-              renderId: renderResult.renderId,
-              bucketName: renderResult.bucketName,
-              functionName: renderResult.functionName,
-              region: renderResult.awsRegion as AwsRegion,
+            const result = await renderMediaOnLambda({
+              functionName: functionName!,
+              region: awsRegion,
+              serveUrl: serveUrl!,
+              composition: "ClipComposition",
+              inputProps,
+              codec: "h264",
+              privacy: "public",
+              forceDurationInFrames: durationInFrames,
+              ...(concurrencyOption !== undefined ? { concurrency: concurrencyOption } : {}),
+              ...(framesPerLambdaOption !== undefined ? { framesPerLambda: framesPerLambdaOption } : {}),
             });
+
+            return {
+              renderId: result.renderId,
+              bucketName: result.bucketName,
+              awsRegion,
+              functionName: functionName!
+            };
           });
 
-          if (progress.fatalErrorEncountered) {
-            throw new Error(`Fatal rendering error: ${progress.errors.map((e) => e.message).join(", ")}`);
-          }
+          // Poll progress outside step.run using Inngest step.sleep to prevent Vercel execution timeouts
+          let isDone = false;
+          let attempts = 0;
+          const maxAttempts = 180;
 
-          if (progress.done) {
-            isDone = true;
-            if (progress.outputFile) {
-              await step.run(`save-clip-url-${i}`, async () => {
+          while (!isDone && attempts < maxAttempts) {
+            attempts++;
+
+            const progress = await step.run(`check-progress-clip-chunk-${chunkIdx}-clip-${i}-attempt-${attempts}`, async () => {
+              return await getRenderProgress({
+                renderId: renderResult.renderId,
+                bucketName: renderResult.bucketName,
+                functionName: renderResult.functionName,
+                region: renderResult.awsRegion as AwsRegion,
+              });
+            });
+
+            if (progress.fatalErrorEncountered) {
+              throw new Error(`AWS Lambda render encountered a fatal error: ${JSON.stringify(progress.errors)}`);
+            }
+
+            if (progress.done) {
+              isDone = true;
+
+              await step.run(`save-render-url-chunk-${chunkIdx}-clip-${i}`, async () => {
+                const s3Url = progress.outputFile;
+                if (!s3Url) {
+                  throw new Error("AWS Lambda render completed, but outputFile was not returned.");
+                }
+
                 await db
                   .update(clips)
                   .set({
-                    clipUrl: progress.outputFile,
+                    clipUrl: s3Url,
                     renderStatus: "completed",
                     updatedAt: new Date(),
                   })
                   .where(eq(clips.id, currentClipId));
               });
             } else {
-              throw new Error("Lambda render completed but returned no output file URL");
+              await step.sleep(`sleep-render-chunk-${chunkIdx}-clip-${i}-attempt-${attempts}`, "15s");
             }
-          } else {
-            // Wait 5 seconds using Inngest native sleep (suspends lambda function execution billed time)
-            await step.sleep(`wait-render-clip-${i}-attempt-${attempts}`, "5s");
-          }
-        }
-
-        if (!isDone) {
-          throw new Error("Rendering timed out on Remotion Lambda after 15 minutes.");
-        }
-
-        // Generate YouTube optimized description
-        const metadata = await step.run(`generate-yt-description-${i}`, async () => {
-          const geminiKey = process.env.GEMINI_API_KEY;
-          if (!geminiKey) {
-            throw new Error("Missing GEMINI_API_KEY.");
           }
 
-          const [clip] = await db
-            .select()
-            .from(clips)
-            .where(eq(clips.id, currentClipId))
-            .limit(1);
+          if (!isDone) {
+            throw new Error(`AWS Lambda render timed out after ${maxAttempts} attempts.`);
+          }
 
-          const prompt = `
-You are an expert social media manager. I will provide you with a short video clip's details (its hook, visual caption, and suggested hashtags).
-Your task is to generate:
-1. A highly engaging, click-worthy YouTube Shorts-optimized title (maximum 100 characters, including relevant hashtags if appropriate).
-2. A compelling, concise YouTube Shorts description (2 to 3 sentences, incorporating relevant keywords and hashtags, maximum 500 characters).
-3. A list of 10 to 15 search-optimized tags (keywords) for YouTube metadata.
+          // Metadata step
+          const metadata = await step.run(`generate-metadata-chunk-${chunkIdx}-clip-${i}`, async () => {
+            const [clip] = await db
+              .select()
+              .from(clips)
+              .where(eq(clips.id, currentClipId))
+              .limit(1);
 
-Clip Details:
-- Hook Text: "${clip.hookText || ""}"
-- Caption Text: "${clip.captionText || ""}"
-- AI Hashtags: ${JSON.stringify(clip.hashtags || [])}
-- Raw Title: "${clip.title}"
-- Transcript/Context Description: "${clip.description || ""}"
+            const geminiKey = process.env.GEMINI_API_KEY;
+            if (!geminiKey) {
+              return {
+                youtubeTitle: clip.title,
+                youtubeDescription: clip.description || "",
+                youtubeTags: [],
+              };
+            }
 
-Language Rules:
-Detect the primary language of the clip content (e.g. Hindi, Spanish, or English). You MUST generate the title and description in that same language (using Devanagari script for Hindi, Cyrillic for Russian, Latin characters for English/Spanish, etc.). The tags should be in that same language and English to maximize searchability.
+            const prompt = `
+Generate optimized metadata for a YouTube Shorts/TikTok video.
+Title: ${clip.title}
+Reason for engagement: ${clip.reason}
+Caption: ${clip.captionText}
 
-You MUST reply strictly with a JSON object (no markdown code blocks, just raw JSON) conforming to this structure:
+Reply strictly with a JSON object:
 {
-  "youtubeTitle": "string",
-  "youtubeDescription": "string",
-  "youtubeTags": ["string"]
+  "youtubeTitle": "optimized title (max 50 chars, no hashtags)",
+  "youtubeDescription": "optimized description with search keywords and hashtags",
+  "youtubeTags": ["tag1", "tag2", "tag3"]
 }
 `;
 
-          const jsonText = await callGemini(prompt, geminiKey);
-          const parsed = JSON.parse(jsonText) as {
-            youtubeTitle: string;
-            youtubeDescription: string;
-            youtubeTags: string[];
-          };
+            const jsonText = await callGemini(prompt, geminiKey);
+            const parsed = JSON.parse(jsonText) as {
+              youtubeTitle: string;
+              youtubeDescription: string;
+              youtubeTags: string[];
+            };
 
-          await db
-            .update(clips)
-            .set({
-              youtubeTitle: parsed.youtubeTitle,
-              youtubeDescription: parsed.youtubeDescription,
-              youtubeTags: parsed.youtubeTags,
-              updatedAt: new Date(),
-            })
-            .where(eq(clips.id, currentClipId));
-
-          return parsed;
-        });
-
-        // Publish to YouTube
-        await step.run(`publish-to-youtube-${i}`, async () => {
-          const [clip] = await db
-            .select()
-            .from(clips)
-            .where(eq(clips.id, currentClipId))
-            .limit(1);
-
-          if (!clip.clipUrl) {
-            throw new Error(`Clip does not have a rendered URL: ${currentClipId}`);
-          }
-
-          // Retrieve user's YouTube connection linked via Zernio OAuth
-          const [youtubeConn] = await db
-            .select()
-            .from(socialConnections)
-            .where(
-              and(
-                eq(socialConnections.userId, userId),
-                eq(socialConnections.platform, "youtube")
-              )
-            )
-            .limit(1);
-
-          if (!youtubeConn || !youtubeConn.externalAccountId) {
-            throw new Error(`User does not have a linked YouTube channel on Zernio. Please link it in Settings.`);
-          }
-
-          let youtubeVideoId: string | null = null;
-          let zernioError: unknown = null;
-
-          try {
-            // Submit post to Zernio API for YouTube
-            const zernioResult = await publishToZernio({
-              title: metadata.youtubeTitle || clip.title,
-              content: metadata.youtubeDescription || clip.description || "",
-              mediaItems: [
-                {
-                  type: "video",
-                  url: clip.clipUrl,
-                }
-              ],
-              platforms: [
-                {
-                  platform: "youtube",
-                  accountId: youtubeConn.externalAccountId,
-                }
-              ],
-              publishNow: true,
-            }) as { id?: string } | undefined;
-
-            youtubeVideoId = zernioResult?.id || "zernio_published";
-          } catch (err) {
-            zernioError = err;
-            console.error("Zernio YouTube publish failed. Attempting direct upload fallback...", err);
-          }
-
-          if (!youtubeVideoId) {
-            // Retrieve direct YouTube refresh token for direct upload fallback
-            const [user] = await db
-              .select({ youtubeRefreshToken: users.youtubeRefreshToken })
-              .from(users)
-              .where(eq(users.id, userId))
-              .limit(1);
-
-            const directRefreshToken = user?.youtubeRefreshToken || youtubeConn?.refreshToken;
-
-            if (!directRefreshToken) {
-              throw new Error(
-                `YouTube upload failed. Zernio error: ${
-                  zernioError instanceof Error ? zernioError.message : String(zernioError)
-                }. Direct upload fallback failed: No direct YouTube refresh token found.`
-              );
-            }
-
-            try {
-              const directId = await uploadVideoToYouTube({
-                s3Url: clip.clipUrl,
-                title: metadata.youtubeTitle || clip.title,
-                description: metadata.youtubeDescription || clip.description || "",
-                tags: metadata.youtubeTags || [],
-                refreshToken: directRefreshToken,
-              });
-              youtubeVideoId = directId;
-              console.log(`Direct YouTube upload fallback succeeded. Video ID: ${youtubeVideoId}`);
-            } catch (fallbackErr) {
-              console.error("Direct YouTube upload fallback failed:", fallbackErr);
-              throw new Error(
-                `YouTube upload failed. Zernio error: ${
-                  zernioError instanceof Error ? zernioError.message : String(zernioError)
-                }. Direct upload fallback error: ${
-                  fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
-                }`
-              );
-            }
-          }
-
-          await db
-            .update(clips)
-            .set({
-              youtubeVideoId,
-              youtubePublishedAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(clips.id, currentClipId));
-
-          // Increment published clips count in pipeline run
-          const [run] = await db
-            .select()
-            .from(pipelineRuns)
-            .where(eq(pipelineRuns.id, pipelineRunId))
-            .limit(1);
-
-          await db
-            .update(pipelineRuns)
-            .set({
-              publishedClips: (run?.publishedClips || 0) + 1,
-              status: "publishing",
-              updatedAt: new Date(),
-            })
-            .where(eq(pipelineRuns.id, pipelineRunId));
-        });
-
-        // Delete S3 clip
-        await step.run(`delete-s3-clip-${i}`, async () => {
-          const [clip] = await db
-            .select()
-            .from(clips)
-            .where(eq(clips.id, currentClipId))
-            .limit(1);
-
-          if (clip.clipUrl) {
-            await deleteFileFromS3(clip.clipUrl);
             await db
               .update(clips)
               .set({
-                s3Deleted: true,
+                youtubeTitle: parsed.youtubeTitle,
+                youtubeDescription: parsed.youtubeDescription,
+                youtubeTags: parsed.youtubeTags,
                 updatedAt: new Date(),
               })
               .where(eq(clips.id, currentClipId));
-          }
-        });
 
-        // Sleep before the next clip (except the last one)
-        if (i < totalClips - 1) {
-          await step.sleep(`sleep-before-next-${i}`, "1m");
+            return parsed;
+          });
+
+          // Publish to YouTube
+          await step.run(`publish-to-youtube-chunk-${chunkIdx}-clip-${i}`, async () => {
+            const [clip] = await db
+              .select()
+              .from(clips)
+              .where(eq(clips.id, currentClipId))
+              .limit(1);
+
+            if (!clip.clipUrl) {
+              throw new Error(`Clip does not have a rendered URL: ${currentClipId}`);
+            }
+
+            // Retrieve user's YouTube connection linked via Zernio OAuth
+            const [youtubeConn] = await db
+              .select()
+              .from(socialConnections)
+              .where(
+                and(
+                  eq(socialConnections.userId, userId),
+                  eq(socialConnections.platform, "youtube")
+                )
+              )
+              .limit(1);
+
+            if (!youtubeConn || !youtubeConn.externalAccountId) {
+              throw new Error(`User does not have a linked YouTube channel on Zernio. Please link it in Settings.`);
+            }
+
+            let youtubeVideoId: string | null = null;
+            let zernioError: unknown = null;
+
+            try {
+              // Submit post to Zernio API for YouTube
+              const zernioResult = await publishToZernio({
+                title: metadata.youtubeTitle || clip.title,
+                content: metadata.youtubeDescription || clip.description || "",
+                mediaItems: [
+                  {
+                    type: "video",
+                    url: clip.clipUrl,
+                  }
+                ],
+                platforms: [
+                  {
+                    platform: "youtube",
+                    accountId: youtubeConn.externalAccountId,
+                  }
+                ],
+                publishNow: true,
+              }) as { id?: string } | undefined;
+
+              youtubeVideoId = zernioResult?.id || "zernio_published";
+            } catch (err) {
+              zernioError = err;
+              console.error("Zernio YouTube publish failed. Attempting direct upload fallback...", err);
+            }
+
+            if (!youtubeVideoId) {
+              // Retrieve direct YouTube refresh token for direct upload fallback
+              const [user] = await db
+                .select({ youtubeRefreshToken: users.youtubeRefreshToken })
+                .from(users)
+                .where(eq(users.id, userId))
+                .limit(1);
+
+              const directRefreshToken = user?.youtubeRefreshToken || youtubeConn?.refreshToken;
+
+              if (!directRefreshToken) {
+                throw new Error(
+                  `YouTube upload failed. Zernio error: ${
+                    zernioError instanceof Error ? zernioError.message : String(zernioError)
+                  }. Direct upload fallback failed: No direct YouTube refresh token found.`
+                );
+              }
+
+              try {
+                const directId = await uploadVideoToYouTube({
+                  s3Url: clip.clipUrl,
+                  title: metadata.youtubeTitle || clip.title,
+                  description: metadata.youtubeDescription || clip.description || "",
+                  tags: metadata.youtubeTags || [],
+                  refreshToken: directRefreshToken,
+                });
+                youtubeVideoId = directId;
+                console.log(`Direct YouTube upload fallback succeeded. Video ID: ${youtubeVideoId}`);
+              } catch (fallbackErr) {
+                console.error("Direct YouTube upload fallback failed:", fallbackErr);
+                throw new Error(
+                  `YouTube upload failed. Zernio error: ${
+                    zernioError instanceof Error ? zernioError.message : String(zernioError)
+                  }. Direct upload fallback error: ${
+                    fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
+                  }`
+                );
+              }
+            }
+
+            await db
+              .update(clips)
+              .set({
+                youtubeVideoId,
+                youtubePublishedAt: new Date(),
+                updatedAt: new Date(),
+              })
+              .where(eq(clips.id, currentClipId));
+
+            // Increment published clips count in pipeline run
+            const [run] = await db
+              .select()
+              .from(pipelineRuns)
+              .where(eq(pipelineRuns.id, pipelineRunId))
+              .limit(1);
+
+            await db
+              .update(pipelineRuns)
+              .set({
+                publishedClips: (run?.publishedClips || 0) + 1,
+                status: "publishing",
+                updatedAt: new Date(),
+              })
+              .where(eq(pipelineRuns.id, pipelineRunId));
+          });
+
+          // Delete S3 clip
+          await step.run(`delete-s3-clip-chunk-${chunkIdx}-clip-${i}`, async () => {
+            const [clip] = await db
+              .select()
+              .from(clips)
+              .where(eq(clips.id, currentClipId))
+              .limit(1);
+
+            if (clip.clipUrl) {
+              await deleteFileFromS3(clip.clipUrl);
+              await db
+                .update(clips)
+                .set({
+                  s3Deleted: true,
+                  updatedAt: new Date(),
+                })
+                .where(eq(clips.id, currentClipId));
+            }
+          });
+
+          // Sleep before the next clip (except the last one)
+          if (i < totalChunkClips - 1) {
+            await step.sleep(`sleep-before-next-chunk-${chunkIdx}-clip-${i}`, "1m");
+          }
+        }
+
+        // Sleep before the next chunk (except the last one)
+        if (chunkIdx < numChunks - 1) {
+          await step.sleep(`sleep-before-next-chunk-${chunkIdx}`, "1m");
         }
       }
 

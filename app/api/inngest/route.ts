@@ -1,5 +1,7 @@
 import { serve } from "inngest/next";
 import { inngest } from "@/lib/inngest/client";
+
+export const maxDuration = 120;
 import { analyzeVideo } from "@/lib/inngest/functions/analyze-video";
 import { renderClip } from "@/lib/inngest/functions/render-clip";
 import { publishScheduledPosts, publishSinglePost, handlePublishFailure } from "@/lib/inngest/functions/publish-posts";
