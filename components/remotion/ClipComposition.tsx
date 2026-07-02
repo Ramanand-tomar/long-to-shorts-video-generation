@@ -230,7 +230,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
         <div
           style={{
             position: "absolute",
-            top: "80px",
+            top: "180px",
             left: "20px",
             right: "20px",
             textAlign: "center",
