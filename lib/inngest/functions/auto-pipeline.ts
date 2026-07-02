@@ -406,7 +406,7 @@ export const autoPipeline = inngest.createFunction(
 
           const prompt = `
 You are an expert AI video editor. I will provide you with the transcript of a segment of a long-form video (specifically from ${chunkStart}s to ${chunkEnd}s of the video), annotated with timestamps for each word.
-Your goal is to identify the top 1-2 highly engaging, contextually complete, and viral clips from this transcript that are suitable for social media (TikTok, YouTube Shorts, Reels).
+Your goal is to identify the top 4-5 highly engaging, contextually complete, and viral clips from this transcript that are suitable for social media (TikTok, YouTube Shorts, Reels).
 
 Guidelines:
 1. Each clip must have a strong hook (compelling first few words).

@@ -230,7 +230,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
         <div
           style={{
             position: "absolute",
-            top: "180px",
+            top: "300px",
             left: "20px",
             right: "20px",
             textAlign: "center",
@@ -261,7 +261,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
               flexPosition === "center"
                 ? "20px"
                 : flexPosition === "flex-start"
-                ? "240px 20px 120px 20px" // Top Overlay pushed down
+                ? "420px 20px 120px 20px" // Top Overlay pushed down
                 : "120px 20px 380px 20px", // Bottom Overlay pushed up (Shorts safe-zone)
             pointerEvents: "none",
             zIndex: 10,
